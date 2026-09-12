@@ -195,8 +195,15 @@ A CFT account is not the wallet address: connecting derives a per-wallet
 confidential identity in the browser, and its `accountId` is what others send to.
 
 Fees: with 1AM the wallet sponsors DUST (its ProofStation balances the tx);
-with Lace the wallet needs DUST of its own. Proving runs on the proof server
-URL in panel 1 (default `http://127.0.0.1:6300`).
+with Lace the wallet needs DUST of its own.
+
+Proving: after connecting, the app defaults to **proving in the wallet** when
+the connector exposes `getProvingProvider` (1AM does its own proving), so no
+proof server is needed and the UI can be hosted statically. Otherwise, or if
+you pick "Proof server" in panel 1, proofs go to the HTTP proof server URL
+(default `http://127.0.0.1:6300`, `npm run docker:proof`). The header shows
+which mode is active. Docker is only required for the proof-server mode and
+for the standalone network used by the headless e2e.
 
 ## How the wallet layer works
 

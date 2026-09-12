@@ -13,7 +13,8 @@ import { FetchZkConfigProvider } from '@midnight-ntwrk/midnight-js-fetch-zk-conf
 import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
 import { levelPrivateStateProvider } from '@midnight-ntwrk/midnight-js-level-private-state-provider';
-import type { FinalizedTxData, MidnightProviders } from '@midnight-ntwrk/midnight-js-types';
+import { createProofProvider, type FinalizedTxData, type MidnightProviders } from '@midnight-ntwrk/midnight-js-types';
+import { dappConnectorProvingProvider } from '@midnight-ntwrk/midnight-js-dapp-connector-proof-provider';
 import {
   CftDemo,
   CftPrivateState,
@@ -80,12 +81,31 @@ export const accountIdOf = (s: CftPrivateState): string => toHex(accountIdFromSe
 
 // ── Providers ──────────────────────────────────────────────────────────────
 
-export const makeProviders = (wallet: ConnectedWallet, network: NetworkConfig, proofServerUrl: string): CftProviders => {
+export type ProvingMode = 'wallet' | 'server';
+
+/**
+ * Proving: either delegated to the wallet through the connector's
+ * `getProvingProvider` (1AM proves inside the wallet / its ProofStation; the
+ * DApp never talks to a proof server), or sent to an HTTP proof server.
+ */
+export const makeProviders = async (
+  wallet: ConnectedWallet,
+  network: NetworkConfig,
+  proving: ProvingMode,
+  proofServerUrl: string,
+): Promise<CftProviders> => {
   const zkConfigProvider = new FetchZkConfigProvider<CftCircuits>(
     `${window.location.origin}/${ZK_PATH.replace(/^\.\//, '')}`,
     fetch.bind(window),
   );
   const walletAndMidnight = connectorProviders(wallet);
+  if (proving === 'wallet' && !wallet.canProveInWallet) {
+    throw new Error(`${wallet.name} does not expose getProvingProvider; switch proving to the proof server`);
+  }
+  const proofProvider =
+    proving === 'wallet'
+      ? createProofProvider(await dappConnectorProvingProvider(wallet.api, zkConfigProvider))
+      : httpClientProofProvider(proofServerUrl, zkConfigProvider);
   return {
     privateStateProvider: levelPrivateStateProvider({
       midnightDbName: 'cft-demo',
@@ -95,7 +115,7 @@ export const makeProviders = (wallet: ConnectedWallet, network: NetworkConfig, p
     }),
     publicDataProvider: indexerPublicDataProvider(network.indexer, network.indexerWS),
     zkConfigProvider,
-    proofProvider: httpClientProofProvider(proofServerUrl, zkConfigProvider),
+    proofProvider,
     walletProvider: walletAndMidnight,
     midnightProvider: walletAndMidnight,
   };

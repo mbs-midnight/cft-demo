@@ -18,6 +18,7 @@ import {
   loadOrCreateIdentity,
   makeProviders,
   saveIdentity,
+  type ProvingMode,
   type Balances,
   type Inspection,
 } from './lib/cft';
@@ -42,6 +43,7 @@ export default function App() {
   const [networkKey, setNetworkKey] = useState<NetworkKey>('preview');
   const network: NetworkConfig = NETWORKS[networkKey];
   const [proofServer, setProofServer] = useState(network.defaultProofServer);
+  const [proving, setProving] = useState<ProvingMode>('server');
   const [wallet, setWallet] = useState<ConnectedWallet | undefined>();
   const [dust, setDust] = useState<{ balance: bigint; cap: bigint } | undefined>();
 
@@ -146,6 +148,7 @@ export default function App() {
       applyNetworkId(network.networkId);
       const connected = await connectWallet(w, network.networkId);
       setWallet(connected);
+      setProving(connected.canProveInWallet ? 'wallet' : 'server');
       setDust(await dustBalance(connected));
       const id = loadOrCreateIdentity(connected.unshieldedAddress);
       say(`connected ${connected.name} · ${short(connected.unshieldedAddress, 12)} · CFT accountId ${short(accountIdOf(id))}`);
@@ -164,7 +167,7 @@ export default function App() {
     run('Deploy token', async () => {
       if (!wallet) throw new Error('connect a wallet first');
       const identity = loadOrCreateIdentity(wallet.unshieldedAddress);
-      const providers = makeProviders(wallet, network, proofServer);
+      const providers = await makeProviders(wallet, network, proving, proofServer);
       const deployed = await deploy(providers, identity, deployName, deploySymbol, BigInt(deployDecimals));
       say(`deployed at ${deployed.deployTxData.public.contractAddress}`, 'ok');
       await attach(await CftClient.attach(providers, deployed, identity));
@@ -174,7 +177,7 @@ export default function App() {
     run('Join token', async () => {
       if (!wallet) throw new Error('connect a wallet first');
       const identity = loadOrCreateIdentity(wallet.unshieldedAddress);
-      const providers = makeProviders(wallet, network, proofServer);
+      const providers = await makeProviders(wallet, network, proving, proofServer);
       const found = await join(providers, contractAddress.trim(), identity);
       await attach(await CftClient.attach(providers, found, identity));
     });
@@ -275,6 +278,7 @@ export default function App() {
               <span className="mono">{short(wallet.unshieldedAddress, 12)}</span>
               {dust && <span className="pill">DUST {formatAmount(dust.balance, 15)}</span>}
               <span className="pill">{network.label}</span>
+              <span className="pill">{proving === 'wallet' ? `proving: in ${wallet.name}` : 'proving: proof server'}</span>
             </>
           ) : (
             <span className="pill">not connected</span>
@@ -351,12 +355,30 @@ export default function App() {
               </select>
             </div>
           </div>
-          <div className="row">
-            <div style={{ flex: 1 }}>
-              <label>Proof server (runs the ZK proving; default is the local Docker one)</label>
-              <input className="grow" style={{ width: '100%' }} value={proofServer} onChange={(e) => setProofServer(e.target.value)} />
+          <div className="row" style={{ alignItems: 'flex-end' }}>
+            <div>
+              <label>Proving</label>
+              <select value={proving} onChange={(e) => setProving(e.target.value as ProvingMode)} disabled={!!client}>
+                <option value="wallet" disabled={!!wallet && !wallet.canProveInWallet}>
+                  In the wallet{wallet && !wallet.canProveInWallet ? ' (not offered by this wallet)' : ''}
+                </option>
+                <option value="server">Proof server (HTTP)</option>
+              </select>
             </div>
+            {proving === 'server' && (
+              <div style={{ flex: 1 }}>
+                <label>Proof server URL (Docker: npm run docker:proof)</label>
+                <input className="grow" style={{ width: '100%' }} value={proofServer} onChange={(e) => setProofServer(e.target.value)} />
+              </div>
+            )}
           </div>
+          <p className="hint">
+            {wallet
+              ? wallet.canProveInWallet
+                ? `${wallet.name} offers proving through the connector, so no proof server is needed.`
+                : `${wallet.name} does not offer proving through the connector; a proof server is required.`
+              : 'After connecting, proving defaults to the wallet if it offers it. The choice is fixed once you join or deploy a token.'}
+          </p>
           <div className="row">
             <button onClick={onConnect} disabled={!!wallet || !walletId || !!busy}>
               Connect
