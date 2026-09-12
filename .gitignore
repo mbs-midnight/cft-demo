@@ -1,6 +1,7 @@
 node_modules/
 dist/
-contract/src/managed/
+# contract/src/managed/ is committed on purpose: Vercel cannot run the Compact
+# compiler, and the wallet fetches prover keys + ZKIR from the hosted site.
 web/public/contract/
 web/dist/
 cli/.state/

@@ -1,0 +1,954 @@
+{
+  "compiler-version": "0.31.1",
+  "language-version": "0.23.0",
+  "runtime-version": "0.16.0",
+  "circuits": [
+    {
+      "name": "register",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+      ],
+      "result-type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "sweep",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+      ],
+      "result-type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "transfer",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "to",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "type-name": "Uint",
+            "maxval": 340282366920938463463374607431768211455
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "burn",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "value",
+          "type": {
+            "type-name": "Uint",
+            "maxval": 340282366920938463463374607431768211455
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "mint",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "account",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "type-name": "Uint",
+            "maxval": 340282366920938463463374607431768211455
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Tuple",
+        "types": [
+        ]
+      }
+    },
+    {
+      "name": "setOnboarded",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "account",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "onboarded",
+          "type": {
+            "type-name": "Boolean"
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Tuple",
+        "types": [
+        ]
+      }
+    },
+    {
+      "name": "setFrozen",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "account",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "isFrozen",
+          "type": {
+            "type-name": "Boolean"
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Tuple",
+        "types": [
+        ]
+      }
+    },
+    {
+      "name": "setPaused",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "isPaused",
+          "type": {
+            "type-name": "Boolean"
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Tuple",
+        "types": [
+        ]
+      }
+    },
+    {
+      "name": "seize",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "account",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "to",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Tuple",
+        "types": [
+        ]
+      }
+    },
+    {
+      "name": "computeAccountId",
+      "pure": true,
+      "proof": false,
+      "arguments": [
+        {
+          "name": "sk",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "derivePk",
+      "pure": true,
+      "proof": false,
+      "arguments": [
+        {
+          "name": "ek",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Alias",
+        "name": "JubjubPoint",
+        "type": {
+          "type-name": "Opaque",
+          "tsType": "JubjubPoint"
+        }
+      }
+    },
+    {
+      "name": "decryptMemo",
+      "pure": true,
+      "proof": false,
+      "arguments": [
+        {
+          "name": "memo",
+          "type": {
+            "type-name": "Struct",
+            "name": "Ciphertext",
+            "elements": [
+              {
+                "name": "ephemeralPk",
+                "type": {
+                  "type-name": "Alias",
+                  "name": "JubjubPoint",
+                  "type": {
+                    "type-name": "Opaque",
+                    "tsType": "JubjubPoint"
+                  }
+                }
+              },
+              {
+                "name": "ct",
+                "type": {
+                  "type-name": "Field"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "ek",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Field"
+      }
+    },
+    {
+      "name": "decryptToPoint",
+      "pure": true,
+      "proof": false,
+      "arguments": [
+        {
+          "name": "ct",
+          "type": {
+            "type-name": "Struct",
+            "name": "Ciphertext",
+            "elements": [
+              {
+                "name": "c1",
+                "type": {
+                  "type-name": "Alias",
+                  "name": "JubjubPoint",
+                  "type": {
+                    "type-name": "Opaque",
+                    "tsType": "JubjubPoint"
+                  }
+                }
+              },
+              {
+                "name": "c2",
+                "type": {
+                  "type-name": "Alias",
+                  "name": "JubjubPoint",
+                  "type": {
+                    "type-name": "Opaque",
+                    "tsType": "JubjubPoint"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "ek",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Alias",
+        "name": "JubjubPoint",
+        "type": {
+          "type-name": "Opaque",
+          "tsType": "JubjubPoint"
+        }
+      }
+    },
+    {
+      "name": "valuePoint",
+      "pure": true,
+      "proof": false,
+      "arguments": [
+        {
+          "name": "value",
+          "type": {
+            "type-name": "Uint",
+            "maxval": 340282366920938463463374607431768211455
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Alias",
+        "name": "JubjubPoint",
+        "type": {
+          "type-name": "Opaque",
+          "tsType": "JubjubPoint"
+        }
+      }
+    },
+    {
+      "name": "addCiphertexts",
+      "pure": true,
+      "proof": false,
+      "arguments": [
+        {
+          "name": "a",
+          "type": {
+            "type-name": "Struct",
+            "name": "Ciphertext",
+            "elements": [
+              {
+                "name": "c1",
+                "type": {
+                  "type-name": "Alias",
+                  "name": "JubjubPoint",
+                  "type": {
+                    "type-name": "Opaque",
+                    "tsType": "JubjubPoint"
+                  }
+                }
+              },
+              {
+                "name": "c2",
+                "type": {
+                  "type-name": "Alias",
+                  "name": "JubjubPoint",
+                  "type": {
+                    "type-name": "Opaque",
+                    "tsType": "JubjubPoint"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "b",
+          "type": {
+            "type-name": "Struct",
+            "name": "Ciphertext",
+            "elements": [
+              {
+                "name": "c1",
+                "type": {
+                  "type-name": "Alias",
+                  "name": "JubjubPoint",
+                  "type": {
+                    "type-name": "Opaque",
+                    "tsType": "JubjubPoint"
+                  }
+                }
+              },
+              {
+                "name": "c2",
+                "type": {
+                  "type-name": "Alias",
+                  "name": "JubjubPoint",
+                  "type": {
+                    "type-name": "Opaque",
+                    "tsType": "JubjubPoint"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Struct",
+        "name": "Ciphertext",
+        "elements": [
+          {
+            "name": "c1",
+            "type": {
+              "type-name": "Alias",
+              "name": "JubjubPoint",
+              "type": {
+                "type-name": "Opaque",
+                "tsType": "JubjubPoint"
+              }
+            }
+          },
+          {
+            "name": "c2",
+            "type": {
+              "type-name": "Alias",
+              "name": "JubjubPoint",
+              "type": {
+                "type-name": "Opaque",
+                "tsType": "JubjubPoint"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "witnesses": [
+    {
+      "name": "wit_ConfidentialTokenSK",
+      "arguments": [
+      ],
+      "result type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "wit_ConfidentialTokenEK",
+      "arguments": [
+      ],
+      "result type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "wit_PlaintextBalance",
+      "arguments": [
+        {
+          "name": "ct",
+          "type": {
+            "type-name": "Struct",
+            "name": "Ciphertext",
+            "elements": [
+              {
+                "name": "c1",
+                "type": {
+                  "type-name": "Alias",
+                  "name": "JubjubPoint",
+                  "type": {
+                    "type-name": "Opaque",
+                    "tsType": "JubjubPoint"
+                  }
+                }
+              },
+              {
+                "name": "c2",
+                "type": {
+                  "type-name": "Alias",
+                  "name": "JubjubPoint",
+                  "type": {
+                    "type-name": "Opaque",
+                    "tsType": "JubjubPoint"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "result type": {
+        "type-name": "Uint",
+        "maxval": 340282366920938463463374607431768211455
+      }
+    },
+    {
+      "name": "wit_RandomnessSeed",
+      "arguments": [
+      ],
+      "result type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "wit_OwnableSK",
+      "arguments": [
+      ],
+      "result type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "wit_ViewingKey",
+      "arguments": [
+        {
+          "name": "account",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        }
+      ],
+      "result type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "wit_ViewedBalance",
+      "arguments": [
+        {
+          "name": "ct",
+          "type": {
+            "type-name": "Struct",
+            "name": "Ciphertext",
+            "elements": [
+              {
+                "name": "c1",
+                "type": {
+                  "type-name": "Alias",
+                  "name": "JubjubPoint",
+                  "type": {
+                    "type-name": "Opaque",
+                    "tsType": "JubjubPoint"
+                  }
+                }
+              },
+              {
+                "name": "c2",
+                "type": {
+                  "type-name": "Alias",
+                  "name": "JubjubPoint",
+                  "type": {
+                    "type-name": "Opaque",
+                    "tsType": "JubjubPoint"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "result type": {
+        "type-name": "Uint",
+        "maxval": 340282366920938463463374607431768211455
+      }
+    }
+  ],
+  "contracts": [
+  ],
+  "ledger": [
+    {
+      "name": "_balances",
+      "index": 0,
+      "exported": true,
+      "storage": "Map",
+      "key": {
+        "type-name": "Bytes",
+        "length": 32
+      },
+      "value": {
+        "type-name": "Struct",
+        "name": "Ciphertext",
+        "elements": [
+          {
+            "name": "c1",
+            "type": {
+              "type-name": "Alias",
+              "name": "JubjubPoint",
+              "type": {
+                "type-name": "Opaque",
+                "tsType": "JubjubPoint"
+              }
+            }
+          },
+          {
+            "name": "c2",
+            "type": {
+              "type-name": "Alias",
+              "name": "JubjubPoint",
+              "type": {
+                "type-name": "Opaque",
+                "tsType": "JubjubPoint"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "_pending",
+      "index": 1,
+      "exported": true,
+      "storage": "Map",
+      "key": {
+        "type-name": "Bytes",
+        "length": 32
+      },
+      "value": {
+        "type-name": "Struct",
+        "name": "Ciphertext",
+        "elements": [
+          {
+            "name": "c1",
+            "type": {
+              "type-name": "Alias",
+              "name": "JubjubPoint",
+              "type": {
+                "type-name": "Opaque",
+                "tsType": "JubjubPoint"
+              }
+            }
+          },
+          {
+            "name": "c2",
+            "type": {
+              "type-name": "Alias",
+              "name": "JubjubPoint",
+              "type": {
+                "type-name": "Opaque",
+                "tsType": "JubjubPoint"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "_encryptionKeys",
+      "index": 2,
+      "exported": true,
+      "storage": "Map",
+      "key": {
+        "type-name": "Bytes",
+        "length": 32
+      },
+      "value": {
+        "type-name": "Alias",
+        "name": "JubjubPoint",
+        "type": {
+          "type-name": "Opaque",
+          "tsType": "JubjubPoint"
+        }
+      }
+    },
+    {
+      "name": "_memos",
+      "index": 3,
+      "exported": true,
+      "storage": "Map",
+      "key": {
+        "type-name": "Bytes",
+        "length": 32
+      },
+      "value": {
+        "type-name": "List",
+        "type": {
+          "type-name": "Struct",
+          "name": "Ciphertext",
+          "elements": [
+            {
+              "name": "ephemeralPk",
+              "type": {
+                "type-name": "Alias",
+                "name": "JubjubPoint",
+                "type": {
+                  "type-name": "Opaque",
+                  "tsType": "JubjubPoint"
+                }
+              }
+            },
+            {
+              "name": "ct",
+              "type": {
+                "type-name": "Field"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "_escrow",
+      "index": 4,
+      "exported": false,
+      "storage": "Map",
+      "key": {
+        "type-name": "Bytes",
+        "length": 32
+      },
+      "value": {
+        "type-name": "Map",
+        "key": {
+          "type-name": "Bytes",
+          "length": 32
+        },
+        "value": {
+          "type-name": "Struct",
+          "name": "EscrowEntry",
+          "elements": [
+            {
+              "name": "spenderCt",
+              "type": {
+                "type-name": "Struct",
+                "name": "Ciphertext",
+                "elements": [
+                  {
+                    "name": "c1",
+                    "type": {
+                      "type-name": "Alias",
+                      "name": "JubjubPoint",
+                      "type": {
+                        "type-name": "Opaque",
+                        "tsType": "JubjubPoint"
+                      }
+                    }
+                  },
+                  {
+                    "name": "c2",
+                    "type": {
+                      "type-name": "Alias",
+                      "name": "JubjubPoint",
+                      "type": {
+                        "type-name": "Opaque",
+                        "tsType": "JubjubPoint"
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "name": "ownerCt",
+              "type": {
+                "type-name": "Struct",
+                "name": "Ciphertext",
+                "elements": [
+                  {
+                    "name": "c1",
+                    "type": {
+                      "type-name": "Alias",
+                      "name": "JubjubPoint",
+                      "type": {
+                        "type-name": "Opaque",
+                        "tsType": "JubjubPoint"
+                      }
+                    }
+                  },
+                  {
+                    "name": "c2",
+                    "type": {
+                      "type-name": "Alias",
+                      "name": "JubjubPoint",
+                      "type": {
+                        "type-name": "Opaque",
+                        "tsType": "JubjubPoint"
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "name": "ownerMemo",
+              "type": {
+                "type-name": "Struct",
+                "name": "Ciphertext",
+                "elements": [
+                  {
+                    "name": "ephemeralPk",
+                    "type": {
+                      "type-name": "Alias",
+                      "name": "JubjubPoint",
+                      "type": {
+                        "type-name": "Opaque",
+                        "tsType": "JubjubPoint"
+                      }
+                    }
+                  },
+                  {
+                    "name": "ct",
+                    "type": {
+                      "type-name": "Field"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "_isInitialized",
+      "index": 5,
+      "exported": false,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Boolean"
+      }
+    },
+    {
+      "name": "_name",
+      "index": 6,
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Opaque",
+        "tsType": "string"
+      }
+    },
+    {
+      "name": "_symbol",
+      "index": 7,
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Opaque",
+        "tsType": "string"
+      }
+    },
+    {
+      "name": "_decimals",
+      "index": 8,
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Uint",
+        "maxval": 255
+      }
+    },
+    {
+      "name": "_totalSupply",
+      "index": 9,
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Uint",
+        "maxval": 340282366920938463463374607431768211455
+      }
+    },
+    {
+      "name": "_isInitialized",
+      "index": 10,
+      "exported": false,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Boolean"
+      }
+    },
+    {
+      "name": "_owner",
+      "index": 11,
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Struct",
+        "name": "Either",
+        "elements": [
+          {
+            "name": "is_left",
+            "type": {
+              "type-name": "Boolean"
+            }
+          },
+          {
+            "name": "left",
+            "type": {
+              "type-name": "Bytes",
+              "length": 32
+            }
+          },
+          {
+            "name": "right",
+            "type": {
+              "type-name": "Struct",
+              "name": "ContractAddress",
+              "elements": [
+                {
+                  "name": "bytes",
+                  "type": {
+                    "type-name": "Bytes",
+                    "length": 32
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "allowlist",
+      "index": 12,
+      "exported": true,
+      "storage": "Set",
+      "type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "frozen",
+      "index": 13,
+      "exported": true,
+      "storage": "Set",
+      "type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "paused",
+      "index": 14,
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Boolean"
+      }
+    }
+  ]
+}
