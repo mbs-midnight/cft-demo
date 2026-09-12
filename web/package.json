@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "vercel-build": "npm --prefix ../contract run build && npm run build"
   },
   "dependencies": {
     "cft-demo-contract": "*",
@@ -24,6 +25,7 @@
     "crypto-browserify": "^3.12.1",
     "process": "^0.11.10",
     "stream-browserify": "^3.0.0",
+    "typescript": "^5.9.3",
     "util": "^0.12.5",
     "vite": "^6.3.5",
     "vite-plugin-static-copy": "^3.1.4",
