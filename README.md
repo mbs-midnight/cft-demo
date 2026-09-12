@@ -164,7 +164,7 @@ the standalone stack pins 8.0.3; the public networks (node 1.0.2) take 8.1.0.
 ### Web UI with 1AM or Lace
 
 ```bash
-npm run docker:proof            # local proof server on :6300 (proving happens here)
+npm run docker:proof            # optional: local proof server on :6300, only for proof-server mode
 npm run web                     # http://localhost:5174
 ```
 
