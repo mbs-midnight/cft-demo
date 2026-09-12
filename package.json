@@ -1,0 +1,68 @@
+{
+  "name": "cft-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "OpenZeppelin ConfidentialFungibleToken (CFT) on Midnight: mint, burn, confidential transfer, viewing keys, freeze and seize. Web UI connects to any DApp-connector wallet (1AM, Lace).",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "workspaces": [
+    "contract",
+    "cli",
+    "web"
+  ],
+  "scripts": {
+    "build:contract": "npm -w cft-demo-contract run compact && npm -w cft-demo-contract run build",
+    "test": "npm -w cft-demo-contract run test",
+    "typecheck": "npm -w cft-demo-contract run typecheck && npm -w cft-demo-cli run typecheck && npm -w cft-demo-web run typecheck",
+    "e2e:standalone": "npm -w cft-demo-cli run e2e:standalone",
+    "e2e:preview": "npm -w cft-demo-cli run e2e:preview",
+    "web": "npm -w cft-demo-web run dev",
+    "web:build": "npm -w cft-demo-web run build",
+    "docker:proof": "docker compose -f docker/proof-server.yml up -d",
+    "docker:standalone": "docker compose -f docker/standalone.yml up -d",
+    "docker:down": "docker compose -f docker/standalone.yml down -v"
+  },
+  "dependencies": {
+    "@midnight-ntwrk/compact-js": "2.5.1",
+    "@midnight-ntwrk/compact-runtime": "0.16.0",
+    "@midnight-ntwrk/dapp-connector-api": "4.0.1",
+    "@midnight-ntwrk/ledger-v8": "8.1.0",
+    "@midnight-ntwrk/midnight-js-contracts": "4.1.1",
+    "@midnight-ntwrk/midnight-js-dapp-connector-proof-provider": "4.1.1",
+    "@midnight-ntwrk/midnight-js-fetch-zk-config-provider": "4.1.1",
+    "@midnight-ntwrk/midnight-js-http-client-proof-provider": "4.1.1",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "4.1.1",
+    "@midnight-ntwrk/midnight-js-level-private-state-provider": "4.1.1",
+    "@midnight-ntwrk/midnight-js-network-id": "4.1.1",
+    "@midnight-ntwrk/midnight-js-node-zk-config-provider": "4.1.1",
+    "@midnight-ntwrk/midnight-js-types": "4.1.1",
+    "@midnight-ntwrk/midnight-js-utils": "4.1.1",
+    "@midnight-ntwrk/onchain-runtime-v3": "3.0.0",
+    "@midnight-ntwrk/platform-js": "2.2.4",
+    "@midnight-ntwrk/wallet-sdk-address-format": "3.1.0",
+    "@midnight-ntwrk/wallet-sdk-dust-wallet": "3.0.0",
+    "@midnight-ntwrk/wallet-sdk-facade": "3.0.0",
+    "@midnight-ntwrk/wallet-sdk-hd": "3.0.1",
+    "@midnight-ntwrk/wallet-sdk-shielded": "2.1.0",
+    "@midnight-ntwrk/wallet-sdk-unshielded-wallet": "2.1.0",
+    "rxjs": "^7.8.1",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "overrides": {
+    "smoldot": "npm:@aspect-build/empty@0.0.0",
+    "@midnight-ntwrk/compact-js": "2.5.1",
+    "@midnight-ntwrk/ledger-v8": "8.1.0",
+    "@midnight-ntwrk/compact-runtime": "0.16.0",
+    "@midnight-ntwrk/onchain-runtime-v3": "3.0.0",
+    "@midnight-ntwrk/platform-js": "2.2.4"
+  }
+}

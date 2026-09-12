@@ -1,0 +1,25 @@
+{
+  "name": "cft-demo-contract",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "compact": "compact compile +0.31.1 src/cft-demo.compact src/managed/cft-demo",
+    "compact:skip-zk": "compact compile +0.31.1 --skip-zk src/cft-demo.compact src/managed/cft-demo",
+    "build": "rm -rf dist && tsc --project tsconfig.build.json && cp -Rf ./src/managed ./dist/managed && cp ./src/cft-demo.compact ./dist",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@noble/curves": "^2.4.0"
+  }
+}

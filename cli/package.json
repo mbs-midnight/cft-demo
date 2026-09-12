@@ -1,0 +1,17 @@
+{
+  "name": "cft-demo-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "e2e:standalone": "tsx src/e2e.ts --network standalone",
+    "e2e:preview": "tsx src/e2e.ts --network preview",
+    "e2e:preprod": "tsx src/e2e.ts --network preprod",
+    "deploy:preview": "tsx src/deploy.ts --network preview",
+    "deploy:preprod": "tsx src/deploy.ts --network preprod",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "cft-demo-contract": "*"
+  }
+}

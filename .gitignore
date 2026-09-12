@@ -1,0 +1,10 @@
+node_modules/
+dist/
+contract/src/managed/
+web/public/contract/
+web/dist/
+cli/.state/
+cli/logs/
+.env*
+*.log
+.DS_Store
