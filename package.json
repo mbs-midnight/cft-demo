@@ -20,7 +20,7 @@
     "e2e:preview": "npm -w cft-demo-cli run e2e:preview",
     "web": "npm -w cft-demo-web run dev",
     "web:build": "npm -w cft-demo-web run build",
-    "vercel-build": "npm -w cft-demo-contract run build && npm -w cft-demo-web run build",
+    "vercel-build": "npm -w cft-demo-web run vercel-build",
     "docker:proof": "docker compose -f docker/proof-server.yml up -d",
     "docker:standalone": "docker compose -f docker/standalone.yml up -d",
     "docker:down": "docker compose -f docker/standalone.yml down -v"

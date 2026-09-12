@@ -213,9 +213,12 @@ dependencies, builds the contract package, then the web app, and serves
 ZKIR and 72 MB of proving keys) is committed because Vercel cannot run the
 Compact compiler and the wallet fetches prover keys from the hosted site.
 
-Project settings on Vercel: **Root Directory = repository root** (leave it
-empty; do not point it at `web`), Framework Preset = Other. Everything else
-comes from `vercel.json`. After `npm run build:contract` locally, commit the
+Vercel scopes npm to the `web` workspace, so `web` declares every package it
+needs and its `vercel-build` script builds the contract first. The bundle is
+written to `web/dist` and copied to `dist` at the repo root, so the output is
+found whether Vercel resolves paths from the repo root or from `web`. Project
+settings: Root Directory empty, Framework Preset "Other"; everything else comes
+from `vercel.json`. After `npm run build:contract` locally, commit the
 regenerated `contract/src/managed` so the hosted keys match the contract.
 
 Hosted, the UI needs no server of its own: the indexer is public, the wallet

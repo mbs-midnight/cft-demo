@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "vercel-build": "npm --prefix ../contract run build && npm run build"
+    "vercel-build": "npm --prefix ../contract run build && npm run build && rm -rf ../dist && cp -R dist ../dist"
   },
   "dependencies": {
     "@midnight-ntwrk/compact-js": "2.5.1",
