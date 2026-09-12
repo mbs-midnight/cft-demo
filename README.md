@@ -205,6 +205,24 @@ you pick "Proof server" in panel 1, proofs go to the HTTP proof server URL
 which mode is active. Docker is only required for the proof-server mode and
 for the standalone network used by the headless e2e.
 
+## Hosting the web UI (Vercel)
+
+`vercel.json` at the repo root does the whole build: it installs dev
+dependencies, builds the contract package, then the web app, and serves
+`web/dist`. The compiled contract (`contract/src/managed`, TypeScript bindings,
+ZKIR and 72 MB of proving keys) is committed because Vercel cannot run the
+Compact compiler and the wallet fetches prover keys from the hosted site.
+
+Project settings on Vercel: **Root Directory = repository root** (leave it
+empty; do not point it at `web`), Framework Preset = Other. Everything else
+comes from `vercel.json`. After `npm run build:contract` locally, commit the
+regenerated `contract/src/managed` so the hosted keys match the contract.
+
+Hosted, the UI needs no server of its own: the indexer is public, the wallet
+signs and submits, and proving runs in the wallet when it offers it (1AM). The
+"Proof server" mode still points at `127.0.0.1:6300`, i.e. the visitor's own
+machine; use it only for local development.
+
 ## How the wallet layer works
 
 - **Private state** (`contract/src/witnesses.ts`) holds `SK`, `EK`, the
