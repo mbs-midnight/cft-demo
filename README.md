@@ -249,6 +249,13 @@ Amounts are typed in tokens (`12.5`), converted with the token's decimals.
 A CFT account is not the wallet address: connecting derives a per-wallet
 confidential identity in the browser, and its `accountId` is what others send to.
 
+On a phone: mobile browsers cannot host wallet extensions, so open the hosted
+URL inside the **1AM app's built-in dApp browser** (it has an address bar and
+injects the connector there). The page detects a mobile browser without a
+wallet and shows these steps. The `webisoftSoftware/midnight-mobile` repo is a
+wallet runtime for building React Native wallets, not something a web DApp
+uses.
+
 Fees: with 1AM the wallet sponsors DUST (its ProofStation balances the tx);
 with Lace the wallet needs DUST of its own.
 

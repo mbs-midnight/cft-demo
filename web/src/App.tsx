@@ -39,6 +39,8 @@ const SOURCE_LABEL: Record<string, string> = {
 export default function App() {
   // ── connection ────────────────────────────────────────────────────────────
   const [wallets, setWallets] = useState<DetectedWallet[]>([]);
+  const [walletSearchDone, setWalletSearchDone] = useState(false);
+  const isMobile = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
   const [walletId, setWalletId] = useState('');
   const [networkKey, setNetworkKey] = useState<NetworkKey>('preview');
   const network: NetworkConfig = NETWORKS[networkKey];
@@ -94,8 +96,12 @@ export default function App() {
       if (found.length) {
         setWallets(found);
         setWalletId((id) => id || found[0].id);
+        setWalletSearchDone(true);
         clearInterval(poll);
-      } else if (++tries > 40) clearInterval(poll);
+      } else if (++tries > 40) {
+        setWalletSearchDone(true);
+        clearInterval(poll);
+      }
     }, 500);
     return () => clearInterval(poll);
   }, []);
@@ -392,6 +398,34 @@ export default function App() {
           <p className="hint">
             1AM shows up as <code>1am</code>, Lace as <code>mnLace</code>. 1AM sponsors fees; Lace needs DUST in the wallet.
           </p>
+          {walletSearchDone && wallets.length === 0 && (
+            <div className="banner mobile-help">
+              {isMobile ? (
+                <>
+                  <b>On a phone, open this page inside the 1AM app.</b> Mobile browsers cannot host wallet extensions, so Safari or Chrome
+                  will never see a wallet here. 1AM has a built-in dApp browser with an address bar that injects the connector.
+                  <ol>
+                    <li>Install 1AM from the App Store or Google Play and set it up.</li>
+                    <li>In 1AM, open the dApp browser and paste this page's address into its address bar.</li>
+                    <li>Pick the same network in 1AM's address bar as in panel 1, then Connect.</li>
+                  </ol>
+                  <button
+                    className="secondary small"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(window.location.href);
+                      say('page URL copied; paste it into the 1AM dApp browser');
+                    }}
+                  >
+                    Copy this page's URL
+                  </button>
+                </>
+              ) : (
+                <>
+                  <b>No wallet found.</b> Install the 1AM or Lace browser extension, unlock it, and reload this page.
+                </>
+              )}
+            </div>
+          )}
         </section>
 
         {/* ── Contract ────────────────────────────────────────────────────── */}

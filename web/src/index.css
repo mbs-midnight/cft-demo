@@ -495,3 +495,20 @@ ol.steps .mark {
   border-color: var(--danger);
   background: rgba(255, 107, 107, 0.12);
 }
+
+.banner.mobile-help {
+  display: block;
+  margin: 10px 0 0;
+  border-color: var(--accent);
+  background: rgba(124, 140, 255, 0.08);
+  font-size: 13px;
+}
+
+.banner.mobile-help ol {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.banner.mobile-help li {
+  margin: 4px 0;
+}
