@@ -20,6 +20,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@midnight-ntwrk/compact-runtime": "0.16.0",
     "@noble/curves": "^2.4.0"
   },
   "devDependencies": {
