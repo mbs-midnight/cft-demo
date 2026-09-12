@@ -112,6 +112,61 @@ under a disclosed viewing key) while **holders need amount privacy** from
 other participants. Viewing keys give auditors, tax authorities or the issuer
 read access per account without a global backdoor.
 
+## What is OpenZeppelin's and what is this project's
+
+### From OpenZeppelin (vendored, unmodified, MIT)
+
+Everything under `contract/src/oz/`, copied from `OpenZeppelin/compact-contracts`
+tag `v0.3.0-alpha.2`:
+
+| File | What it provides |
+|---|---|
+| `token/ConfidentialFungibleToken.compact` | The CFT itself: ElGamal balance map, pending/spendable split, `register`, `sweep`, `transfer`, the `_mint` / `_burn` building blocks, escrow allowances, the memo channel, and its four witness declarations |
+| `token/extensions/ConfidentialFungibleTokenPublicSupply.compact` | Public `totalSupply` with `_addSupply` / `_subSupply` |
+| `crypto/ElGamal.compact` | Exponential ElGamal over Jubjub: encrypt, homomorphic add/sub, key derivation, `assertDecryptsTo` |
+| `crypto/EcdhMask.compact` | The one-time-pad memo scheme that delivers exact amounts to the recipient |
+| `access/Ownable.compact`, `utils/Utils.compact` | Witness-derived owner identity, used for the issuer |
+
+That is the standard. Everything the token *is* cryptographically (how
+balances are hidden, how a spend is proven, how a recipient learns an amount)
+comes from there. These files are not edited; the only difference from OZ
+`main` is a type annotation OZ added later.
+
+### Written for this project
+
+- **Contract wrapper** (`contract/src/cft-demo.compact`): composes the OZ
+  modules and adds the compliance policy the CFT deliberately leaves to the
+  deployer: the onboarding allowlist gating `register`; issuer-gated `mint`
+  and holder `burn`, each paired with the supply extension; `setFrozen`,
+  checked on both sides of a transfer via OZ's returned-caller-id pattern;
+  `setPaused`; `seize`, which takes the frozen account's viewing key as a
+  witness and proves the amount before moving it; and the pure helpers the
+  wallet uses (`decryptMemo`, `decryptToPoint`, `valuePoint`, ...).
+- **Wallet layer** (`contract/src/witnesses.ts`, `crypto.ts`, `wallet.ts`):
+  OZ ships only a test witness with a fixed seed and no wallet. This is the
+  production-style counterpart its module header says an integration must
+  build: private state and witnesses, per-transaction seed rotation,
+  memo-based pending balances, candidate-verified spendable balances,
+  bounded discrete-log recovery, viewing-key export/import, formatting.
+- **Tests** (`contract/src/cft-demo.test.ts`): 14 simulator tests over the
+  composed contract.
+- **CLI** (`cli/`): seed-wallet lifecycle (adapted from the mnf-se-examples
+  reference), the midnight-js client, the deploy script, the end-to-end
+  scenario.
+- **Web app** (`web/`): DApp connector integration for 1AM and Lace,
+  wallet-or-server proving, the React UI (guide, issuer panel, viewing-key
+  audit and seize flow, the "what the chain sees" observer).
+- **Infrastructure**: Docker files pinned to the Preview component versions,
+  Vercel config, this README.
+
+### The boundary
+
+Swap this wrapper out and everything in `contract/src/oz/` is still a working
+CFT; swap OZ out and nothing here works. Two design decisions are this
+project's rather than the standard's: making viewing-key disclosure a
+condition of onboarding, and defining seize as "prove the amount with the
+disclosed key, then move it", one concrete way to fill the gap OZ documents.
+
 ## The demo contract
 
 `contract/src/cft-demo.compact` composes the vendored OZ modules:
