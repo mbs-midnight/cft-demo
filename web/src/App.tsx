@@ -10,6 +10,9 @@ import {
   type DetectedWallet,
 } from './lib/wallet';
 import { observeAccount, observeTransaction, type KeyRing, type ObservedRow } from './lib/observe';
+import { NotePrivateState } from 'cft-demo-contract';
+import { NoteClient, deployNote, detectModel, joinNote, loadOrCreateNoteIdentity, makeNoteProviders, saveNoteIdentity } from './lib/note';
+import { NotePanels } from './NotePanels';
 import {
   CftClient,
   accountIdOf,
@@ -52,6 +55,10 @@ export default function App() {
   // ── contract ──────────────────────────────────────────────────────────────
   const [contractAddress, setContractAddress] = useState(() => localStorage.getItem('cft-demo/last-contract') ?? '');
   const [client, setClient] = useState<CftClient | undefined>();
+  const [noteClient, setNoteClient] = useState<NoteClient | undefined>();
+  const [model, setModel] = useState<'cft' | 'note'>('cft');
+  const [lastTxHash, setLastTxHash] = useState<string | undefined>();
+  const [refreshTick, setRefreshTick] = useState(0);
   const [token, setToken] = useState<TokenInfo | undefined>();
   const [balances, setBalances] = useState<Balances | undefined>();
   const [deployName, setDeployName] = useState('Confidential Dollar');
@@ -169,19 +176,54 @@ export default function App() {
     await refresh(c);
   };
 
+  const attachNote = async (c: NoteClient) => {
+    if (wallet) saveNoteIdentity(wallet.unshieldedAddress, c.identity);
+    setClient(undefined);
+    setBalances(undefined);
+    setNoteClient(c);
+    localStorage.setItem('cft-demo/last-contract', c.address);
+    setContractAddress(c.address);
+    setRefreshTick((t) => t + 1);
+  };
+
   const onDeploy = () =>
     run('Deploy token', async () => {
       if (!wallet) throw new Error('connect a wallet first');
+      if (model === 'note') {
+        let identity = loadOrCreateNoteIdentity(wallet.unshieldedAddress);
+        if (!identity.roles) {
+          // The deployer holds issuer, authority, audit and supply roles.
+          identity = NotePrivateState.fromSecrets(identity.secretKeyHex, identity.encSecretHex, NotePrivateState.generate(true).roles);
+          saveNoteIdentity(wallet.unshieldedAddress, identity);
+        }
+        const providers = await makeNoteProviders(wallet, network, proving, proofServer);
+        const deployed = await deployNote(providers, identity);
+        say(`deployed note token at ${deployed.deployTxData.public.contractAddress}`, 'ok');
+        await attachNote(await NoteClient.attach(providers, deployed, identity));
+        return;
+      }
       const identity = loadOrCreateIdentity(wallet.unshieldedAddress);
       const providers = await makeProviders(wallet, network, proving, proofServer);
       const deployed = await deploy(providers, identity, deployName, deploySymbol, BigInt(deployDecimals));
       say(`deployed at ${deployed.deployTxData.public.contractAddress}`, 'ok');
+      setNoteClient(undefined);
       await attach(await CftClient.attach(providers, deployed, identity));
     });
 
   const onJoin = () =>
     run('Join token', async () => {
       if (!wallet) throw new Error('connect a wallet first');
+      const detected = await detectModel(network, contractAddress);
+      if (detected === 'unknown') throw new Error('that address is not a CFT demo contract (neither account nor note model)');
+      setModel(detected);
+      if (detected === 'note') {
+        const identity = loadOrCreateNoteIdentity(wallet.unshieldedAddress);
+        const providers = await makeNoteProviders(wallet, network, proving, proofServer);
+        const found = await joinNote(providers, contractAddress.trim(), identity);
+        await attachNote(await NoteClient.attach(providers, found, identity));
+        return;
+      }
+      setNoteClient(undefined);
       const identity = loadOrCreateIdentity(wallet.unshieldedAddress);
       const providers = await makeProviders(wallet, network, proving, proofServer);
       const found = await join(providers, contractAddress.trim(), identity);
@@ -194,9 +236,18 @@ export default function App() {
       const r = await fn(client);
       say(`${label}: tx ${short(r.txId, 8)} in block ${r.blockHeight}`, 'ok');
       setObsHash(r.txId);
+      setLastTxHash(r.txId);
       setObsTab('tx');
       await refresh();
       await observe('tx', r.txId).catch(() => undefined);
+    });
+
+  const txNote = (label: string, fn: () => Promise<{ txId: string; blockHeight: number }>) =>
+    run(label, async () => {
+      const r = await fn();
+      say(`${label}: tx ${short(r.txId, 8)} in block ${r.blockHeight}`, 'ok');
+      setLastTxHash(r.txId);
+      setRefreshTick((t) => t + 1);
     });
 
   const claimed = useMemo(() => {
@@ -269,7 +320,17 @@ export default function App() {
       hint: 'Panel 5. Freeze targets one accountId (needed before seize in panel 6); pause is the global kill switch for everyone.',
     },
   ];
-  const nextStep = steps.find((s) => !s.done);
+  const noteSteps: { label: string; done: boolean; hint: string }[] = [
+    { label: 'Connect a wallet', done: !!wallet, hint: 'Panel 1.' },
+    { label: 'Deploy or join a note token', done: !!noteClient, hint: 'Panel 2, model "Note". The deployer holds the issuer, authority and audit roles.' },
+    { label: 'Share your payment address', done: false, hint: 'Panel 3 "copy address": spend key + delivery key. There is no registration step and no public account.' },
+    { label: 'Issuer mints notes', done: false, hint: 'Panel 5. Paste the recipient payment address. Notes appear in their panel 3 after a refresh.' },
+    { label: 'Pay privately, burn', done: false, hint: 'Panel 4. One note per payment; change comes back as a new note.' },
+    { label: 'Auditor reads the trail; authority freezes or seizes', done: false, hint: 'Panel 5: every note with owner and amount; freeze and seize act on a single note.' },
+    { label: 'Compare public vs auditor view', done: false, hint: 'Panel 7 after any transaction.' },
+  ];
+  const activeSteps = noteClient ? noteSteps : steps;
+  const nextStep = activeSteps.find((s) => !s.done);
 
   return (
     <div className="app">
@@ -320,7 +381,7 @@ export default function App() {
             on-chain; who sent to whom is public.
           </p>
           <ol className="steps">
-            {steps.map((s) => (
+            {activeSteps.map((s) => (
               <li key={s.label} className={s.done ? 'done' : s === nextStep ? 'next' : ''}>
                 <span className="mark">{s.done ? '✓' : s === nextStep ? '→' : '·'}</span>
                 <span>
@@ -440,13 +501,34 @@ export default function App() {
           </div>
           <label style={{ marginTop: 12 }}>…or deploy a new one (you become the issuer)</label>
           <div className="row">
-            <input style={{ width: 170 }} value={deployName} onChange={(e) => setDeployName(e.target.value)} placeholder="name" />
-            <input style={{ width: 80 }} value={deploySymbol} onChange={(e) => setDeploySymbol(e.target.value)} placeholder="symbol" />
+            <select value={model} onChange={(e) => setModel(e.target.value as 'cft' | 'note')} disabled={!!busy}>
+              <option value="cft">Account model (CFT): amounts hidden, accounts public</option>
+              <option value="note">Note model: sender, recipient and amounts hidden; auditor sees all</option>
+            </select>
+          </div>
+          <div className="row">
+            <input style={{ width: 170 }} value={deployName} onChange={(e) => setDeployName(e.target.value)} placeholder="name" disabled={model === 'note'} />
+            <input style={{ width: 80 }} value={deploySymbol} onChange={(e) => setDeploySymbol(e.target.value)} placeholder="symbol" disabled={model === 'note'} />
             <input style={{ width: 60 }} value={deployDecimals} onChange={(e) => setDeployDecimals(e.target.value)} placeholder="dec" />
             <button className="good" onClick={onDeploy} disabled={!wallet || !!busy}>
               Deploy
             </button>
           </div>
+          {noteClient && (
+            <dl className="kv" style={{ marginTop: 12 }}>
+              <dt>Token</dt>
+              <dd>
+                Note model <span className="pill good">private graph</span> · {deployDecimals} decimals (display only; the contract has no metadata)
+              </dd>
+              <dt>Address</dt>
+              <dd className="mono">
+                {noteClient.address}{' '}
+                <button className="secondary small" onClick={() => void navigator.clipboard.writeText(noteClient.address)}>
+                  copy
+                </button>
+              </dd>
+            </dl>
+          )}
           {token && client && (
             <dl className="kv" style={{ marginTop: 12 }}>
               <dt>Token</dt>
@@ -477,6 +559,20 @@ export default function App() {
           )}
         </section>
 
+        {noteClient ? (
+          <NotePanels
+            client={noteClient}
+            network={network}
+            decimals={Number(deployDecimals || 0)}
+            busy={busy}
+            lastTxHash={lastTxHash}
+            run={run}
+            tx={txNote}
+            say={say}
+            refreshTick={refreshTick}
+          />
+        ) : (
+          <>
         {/* ── Account ─────────────────────────────────────────────────────── */}
         <section className="panel">
           <h2>3 · Your confidential account</h2>
@@ -916,6 +1012,9 @@ export default function App() {
             </div>
           )}
         </section>
+
+          </>
+        )}
 
         {/* ── Log ─────────────────────────────────────────────────────────── */}
         <section className="panel wide">

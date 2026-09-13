@@ -1,0 +1,2 @@
+bdf8b5cd715467d91164e440d16f2ccd51a31b30 2026-07-24
+OpenZeppelin/compact-contracts branch feat/hybrid-confidential-token (draft, unaudited)

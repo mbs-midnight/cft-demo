@@ -9,7 +9,9 @@
     "e2e:preprod": "tsx src/e2e.ts --network preprod",
     "deploy:preview": "tsx src/deploy.ts --network preview",
     "deploy:preprod": "tsx src/deploy.ts --network preprod",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "e2e-note:standalone": "tsx src/e2e-note.ts --network standalone",
+    "e2e-note:preview": "tsx src/e2e-note.ts --network preview"
   },
   "dependencies": {
     "cft-demo-contract": "*"

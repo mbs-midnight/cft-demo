@@ -23,7 +23,8 @@
     "vercel-build": "npm -w cft-demo-web run vercel-build",
     "docker:proof": "docker compose -f docker/proof-server.yml up -d",
     "docker:standalone": "docker compose -f docker/standalone.yml up -d",
-    "docker:down": "docker compose -f docker/standalone.yml down -v"
+    "docker:down": "docker compose -f docker/standalone.yml down -v",
+    "e2e-note:standalone": "npm -w cft-demo-cli run e2e-note:standalone"
   },
   "dependencies": {
     "@midnight-ntwrk/compact-js": "2.5.1",

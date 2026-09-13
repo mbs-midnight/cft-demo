@@ -13,9 +13,9 @@
     }
   },
   "scripts": {
-    "compact": "compact compile +0.31.1 src/cft-demo.compact src/managed/cft-demo",
-    "compact:skip-zk": "compact compile +0.31.1 --skip-zk src/cft-demo.compact src/managed/cft-demo",
-    "build": "rm -rf dist && tsc --project tsconfig.build.json && cp -Rf ./src/managed ./dist/managed && cp ./src/cft-demo.compact ./dist",
+    "compact": "compact compile +0.31.1 src/cft-demo.compact src/managed/cft-demo && compact compile +0.31.1 src/cft-note.compact src/managed/cft-note",
+    "compact:skip-zk": "compact compile +0.31.1 --skip-zk src/cft-demo.compact src/managed/cft-demo && compact compile +0.31.1 --skip-zk src/cft-note.compact src/managed/cft-note",
+    "build": "rm -rf dist && tsc --project tsconfig.build.json && cp -Rf ./src/managed ./dist/managed && cp ./src/*.compact ./dist",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },

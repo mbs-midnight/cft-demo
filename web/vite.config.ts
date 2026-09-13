@@ -26,6 +26,7 @@ export default defineConfig({
     viteStaticCopy({
       targets: [
         { src: path.resolve(__dirname, '..', 'contract', 'src', 'managed', 'cft-demo') + '/*', dest: 'contract/cft-demo' },
+        { src: path.resolve(__dirname, '..', 'contract', 'src', 'managed', 'cft-note') + '/*', dest: 'contract/cft-note' },
       ],
     }),
   ],

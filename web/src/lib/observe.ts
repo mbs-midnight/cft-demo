@@ -63,6 +63,44 @@ const TX_QUERY = (byIdentifier: boolean) => `query($hash: HexEncoded!) {
   }
 }`;
 
+export interface PublicTx {
+  hash: string;
+  blockHeight: number;
+  /** Entry points called on `contractAddress` (or a description if none). */
+  circuit: string;
+  entryPoints: string[];
+  feeText: string;
+  /** The transaction's own printed form (transcript included), if parseable. */
+  transcript?: string;
+}
+
+/** Everything an explorer has about a transaction: indexer fields plus the transaction bytes. */
+export const fetchPublicTx = async (indexer: string, hash: string, contractAddress: string): Promise<PublicTx> => {
+  const clean = hash.trim().replace(/^0x/, '').toLowerCase();
+  const data = await gql(indexer, TX_QUERY(clean.length !== 64), { hash: clean });
+  const tx = (data?.transactions ?? [])[0];
+  if (!tx) throw new Error('transaction not found (not indexed yet? try again in a few seconds)');
+  const actions: { __typename: string; address: string; entryPoint?: string }[] = tx.contractActions ?? [];
+  const ours = actions.filter((a) => a.address === contractAddress);
+  const entryPoints = ours.map((a) => a.entryPoint ?? a.__typename.replace('Contract', '').toLowerCase());
+  const circuit = entryPoints.join(', ') || (actions.length ? 'other contract' : 'no contract call');
+  let feeText = 'unknown';
+  let transcript: string | undefined;
+  try {
+    const t = Transaction.deserialize('signature', 'proof', 'binding', hexb(tx.raw));
+    transcript = t.toString(true);
+    const v = transcript.match(/v_fee: (\d+)/);
+    if (v) feeText = `${formatAmount(BigInt(v[1]), 15)} DUST (paid by the wallet)`;
+  } catch {
+    /* keep indexer data only */
+  }
+  if (feeText === 'unknown') {
+    const feeRaw = typeof tx.fee === 'string' ? tx.fee : tx.fee?.paidFees;
+    if (feeRaw && /^\d+$/.test(String(feeRaw))) feeText = `${formatAmount(BigInt(feeRaw), 15)} DUST (paid by the wallet)`;
+  }
+  return { hash: tx.hash, blockHeight: Number(tx.block.height), circuit, entryPoints, feeText, transcript };
+};
+
 export interface KeyRing {
   /** accountId -> viewing key hex, for every account this browser can read. */
   keys: Record<string, string>;
@@ -86,36 +124,18 @@ export const observeTransaction = async (
   symbol: string,
   ring: KeyRing,
 ): Promise<ObservedTx> => {
-  const clean = hash.trim().replace(/^0x/, '').toLowerCase();
-  const data = await gql(indexer, TX_QUERY(clean.length !== 64), { hash: clean });
-  const tx = (data?.transactions ?? [])[0];
-  if (!tx) throw new Error('transaction not found (not indexed yet? try again in a few seconds)');
-
-  const actions: { __typename: string; address: string; entryPoint?: string }[] = tx.contractActions ?? [];
-  const ours = actions.filter((a) => a.address === contractAddress);
-  const entryPoints = ours.map((a) => a.entryPoint ?? a.__typename.replace('Contract', '').toLowerCase());
-  const circuit = entryPoints.join(', ') || (actions.length ? 'other contract' : 'no contract call');
-
+  const tx = await fetchPublicTx(indexer, hash, contractAddress);
+  const entryPoints = tx.entryPoints;
   // Parties: 32-byte values the transcript pushes that are registered accounts.
   const registered = new Set<string>([...ledger.CFT__encryptionKeys].map(([id]) => toHex(id)));
-  let parties: string[] = [];
-  let feeText = 'unknown';
-  try {
-    const t = Transaction.deserialize('signature', 'proof', 'binding', hexb(tx.raw));
-    const text = t.toString(true);
-    parties = [...new Set([...text.matchAll(/<\[([0-9a-f]{64})\]: b32>/g)].map((m) => m[1]))].filter((id) => registered.has(id));
-    const v = text.match(/v_fee: (\d+)/);
-    if (v) feeText = `${formatAmount(BigInt(v[1]), 15)} DUST (paid by the wallet)`;
-  } catch {
-    /* raw not parseable in this environment: keep what the indexer gave us */
-  }
-  if (feeText === 'unknown') {
-    const feeRaw = typeof tx.fee === 'string' ? tx.fee : tx.fee?.paidFees;
-    if (feeRaw && /^\d+$/.test(String(feeRaw))) feeText = `${formatAmount(BigInt(feeRaw), 15)} DUST (paid by the wallet)`;
-  }
+  const parties = tx.transcript
+    ? [...new Set([...tx.transcript.matchAll(/<\[([0-9a-f]{64})\]: b32>/g)].map((m) => m[1]))].filter((id) => registered.has(id))
+    : [];
+  const feeText = tx.feeText;
+  const circuit = tx.circuit;
 
   const rows: ObservedRow[] = [
-    { label: 'Transaction', publicValue: `${short(tx.hash, 10)} · block ${tx.block.height}`, privateValue: 'same', hidden: false },
+    { label: 'Transaction', publicValue: `${short(tx.hash, 10)} · block ${tx.blockHeight}`, privateValue: 'same', hidden: false },
     { label: 'Contract', publicValue: short(contractAddress, 10), privateValue: 'same', hidden: false },
     { label: 'Circuit called', publicValue: circuit, privateValue: 'same', hidden: false },
     { label: 'Fee', publicValue: feeText, privateValue: 'same', hidden: false },
@@ -213,4 +233,66 @@ export const observeAccount = (
   }
   rows.push({ label: 'Debits (sends, burns)', publicValue: 'visible as transactions from this id; amounts hidden', privateValue: 'known to the holder only', hidden: true });
   return rows;
+};
+
+// ── Note model ─────────────────────────────────────────────────────────────
+
+export interface NoteAuditedOutput {
+  ownerPk: string;
+  value: bigint;
+  spent: boolean;
+}
+
+/**
+ * Note token: the public side has no accounts and no amounts at all, only
+ * commitments, nullifiers and ciphertexts. The private side is the auditor's:
+ * with the audit key, the newest outputs in the audit trail (this transaction's,
+ * if nothing landed after it).
+ */
+export const observeNoteTransaction = async (
+  indexer: string,
+  hash: string,
+  contractAddress: string,
+  decimals: number,
+  publicCounts: { commitments: number; nullifiers: number; frozen: number },
+  auditorNewest: NoteAuditedOutput[] | undefined,
+  nameOfPk: (pk: string) => string,
+): Promise<ObservedTx> => {
+  const tx = await fetchPublicTx(indexer, hash, contractAddress);
+  const ep = tx.entryPoints[0];
+  const b32 = tx.transcript ? new Set([...tx.transcript.matchAll(/<\[([0-9a-f]{64})\]: b32>/g)].map((m) => m[1])).size : 0;
+  const outputs = ep === 'transfer' || ep === 'burn' ? 2 : ep === 'mint' || ep === 'seize' ? 1 : 0;
+  const spends = ep === 'transfer' || ep === 'burn' || ep === 'seize' ? 1 : 0;
+  const rows: ObservedRow[] = [
+    { label: 'Transaction', publicValue: `${short(tx.hash, 10)} · block ${tx.blockHeight}`, privateValue: 'same', hidden: false },
+    { label: 'Contract', publicValue: short(contractAddress, 10), privateValue: 'same', hidden: false },
+    { label: 'Circuit called', publicValue: tx.circuit, privateValue: 'same', hidden: false },
+    { label: 'Fee', publicValue: tx.feeText, privateValue: 'same', hidden: false },
+  ];
+  if (outputs || spends) {
+    rows.push({
+      label: 'Written to the ledger',
+      publicValue: `${outputs} commitment(s), ${spends} nullifier(s), ${outputs} encrypted delivery + ${outputs} audit record(s); ${b32} opaque 32-byte hashes in the transcript`,
+      privateValue: 'same',
+      hidden: false,
+    });
+    const priv =
+      auditorNewest && auditorNewest.length
+        ? auditorNewest
+            .slice(0, outputs)
+            .map((o) => `${nameOfPk(o.ownerPk)} received ${formatAmount(o.value, decimals)}${o.spent ? ' (since spent)' : ''}`)
+            .join('; ')
+        : 'needs the audit key';
+    rows.push({ label: 'Sender', publicValue: 'hidden: the nullifier reveals nothing about who spent', privateValue: spends ? 'the owner of the consumed note (auditor attributes it)' : 'no spend', hidden: spends > 0 });
+    rows.push({ label: 'Recipient(s) and amounts', publicValue: 'hidden: no account ids, no amounts', privateValue: priv, hidden: true });
+  } else if (ep === 'setFrozen') {
+    rows.push({ label: 'Effect', publicValue: 'a nullifier was added to / removed from the frozen set (which note it is stays hidden)', privateValue: 'the auditor knows which note and whose', hidden: true });
+  }
+  rows.push({
+    label: 'Public totals',
+    publicValue: `${publicCounts.commitments} commitments, ${publicCounts.nullifiers} nullifiers, ${publicCounts.frozen} frozen; supply encrypted`,
+    privateValue: 'same',
+    hidden: false,
+  });
+  return { hash: tx.hash, rows };
 };

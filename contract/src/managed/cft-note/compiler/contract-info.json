@@ -1,0 +1,969 @@
+{
+  "compiler-version": "0.31.1",
+  "language-version": "0.23.0",
+  "runtime-version": "0.16.0",
+  "circuits": [
+    {
+      "name": "mint",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "recipientPk",
+          "type": {
+            "type-name": "Field"
+          }
+        },
+        {
+          "name": "recipientEncPk",
+          "type": {
+            "type-name": "Alias",
+            "name": "JubjubPoint",
+            "type": {
+              "type-name": "Opaque",
+              "tsType": "JubjubPoint"
+            }
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "type-name": "Uint",
+            "maxval": 340282366920938463463374607431768211455
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Tuple",
+        "types": [
+        ]
+      }
+    },
+    {
+      "name": "transfer",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "recipientPk",
+          "type": {
+            "type-name": "Field"
+          }
+        },
+        {
+          "name": "recipientEncPk",
+          "type": {
+            "type-name": "Alias",
+            "name": "JubjubPoint",
+            "type": {
+              "type-name": "Opaque",
+              "tsType": "JubjubPoint"
+            }
+          }
+        },
+        {
+          "name": "senderEncPk",
+          "type": {
+            "type-name": "Alias",
+            "name": "JubjubPoint",
+            "type": {
+              "type-name": "Opaque",
+              "tsType": "JubjubPoint"
+            }
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "type-name": "Uint",
+            "maxval": 340282366920938463463374607431768211455
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Tuple",
+        "types": [
+        ]
+      }
+    },
+    {
+      "name": "burn",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "senderEncPk",
+          "type": {
+            "type-name": "Alias",
+            "name": "JubjubPoint",
+            "type": {
+              "type-name": "Opaque",
+              "tsType": "JubjubPoint"
+            }
+          }
+        },
+        {
+          "name": "value",
+          "type": {
+            "type-name": "Uint",
+            "maxval": 340282366920938463463374607431768211455
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Tuple",
+        "types": [
+        ]
+      }
+    },
+    {
+      "name": "seize",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "targetOwnerPk",
+          "type": {
+            "type-name": "Field"
+          }
+        },
+        {
+          "name": "recoveryPk",
+          "type": {
+            "type-name": "Field"
+          }
+        },
+        {
+          "name": "recoveryEncPk",
+          "type": {
+            "type-name": "Alias",
+            "name": "JubjubPoint",
+            "type": {
+              "type-name": "Opaque",
+              "tsType": "JubjubPoint"
+            }
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Tuple",
+        "types": [
+        ]
+      }
+    },
+    {
+      "name": "setFrozen",
+      "pure": false,
+      "proof": true,
+      "arguments": [
+        {
+          "name": "nf",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "isFrozen",
+          "type": {
+            "type-name": "Boolean"
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Tuple",
+        "types": [
+        ]
+      }
+    },
+    {
+      "name": "derivePk",
+      "pure": true,
+      "proof": false,
+      "arguments": [
+        {
+          "name": "sk",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Field"
+      }
+    },
+    {
+      "name": "encPkOf",
+      "pure": true,
+      "proof": false,
+      "arguments": [
+        {
+          "name": "encSk",
+          "type": {
+            "type-name": "Field"
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Alias",
+        "name": "JubjubPoint",
+        "type": {
+          "type-name": "Opaque",
+          "tsType": "JubjubPoint"
+        }
+      }
+    },
+    {
+      "name": "commitOf",
+      "pure": true,
+      "proof": false,
+      "arguments": [
+        {
+          "name": "note",
+          "type": {
+            "type-name": "Struct",
+            "name": "Note",
+            "elements": [
+              {
+                "name": "value",
+                "type": {
+                  "type-name": "Uint",
+                  "maxval": 340282366920938463463374607431768211455
+                }
+              },
+              {
+                "name": "nonce",
+                "type": {
+                  "type-name": "Field"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "pk",
+          "type": {
+            "type-name": "Field"
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "nullifierOf",
+      "pure": true,
+      "proof": false,
+      "arguments": [
+        {
+          "name": "note",
+          "type": {
+            "type-name": "Struct",
+            "name": "Note",
+            "elements": [
+              {
+                "name": "value",
+                "type": {
+                  "type-name": "Uint",
+                  "maxval": 340282366920938463463374607431768211455
+                }
+              },
+              {
+                "name": "nonce",
+                "type": {
+                  "type-name": "Field"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "recoverNote",
+      "pure": true,
+      "proof": false,
+      "arguments": [
+        {
+          "name": "delivery",
+          "type": {
+            "type-name": "Struct",
+            "name": "FullDelivery",
+            "elements": [
+              {
+                "name": "ephemeral",
+                "type": {
+                  "type-name": "Alias",
+                  "name": "JubjubPoint",
+                  "type": {
+                    "type-name": "Opaque",
+                    "tsType": "JubjubPoint"
+                  }
+                }
+              },
+              {
+                "name": "valueCt",
+                "type": {
+                  "type-name": "Field"
+                }
+              },
+              {
+                "name": "nonceCt",
+                "type": {
+                  "type-name": "Field"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "encSk",
+          "type": {
+            "type-name": "Field"
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Struct",
+        "name": "Recovered",
+        "elements": [
+          {
+            "name": "value",
+            "type": {
+              "type-name": "Field"
+            }
+          },
+          {
+            "name": "nonce",
+            "type": {
+              "type-name": "Field"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "recoverAuditRecord",
+      "pure": true,
+      "proof": false,
+      "arguments": [
+        {
+          "name": "record",
+          "type": {
+            "type-name": "Struct",
+            "name": "AuditRecord",
+            "elements": [
+              {
+                "name": "ephemeralPk",
+                "type": {
+                  "type-name": "Alias",
+                  "name": "JubjubPoint",
+                  "type": {
+                    "type-name": "Opaque",
+                    "tsType": "JubjubPoint"
+                  }
+                }
+              },
+              {
+                "name": "valueCt",
+                "type": {
+                  "type-name": "Field"
+                }
+              },
+              {
+                "name": "ownerCt",
+                "type": {
+                  "type-name": "Field"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "auditSk",
+          "type": {
+            "type-name": "Field"
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Struct",
+        "name": "AuditView",
+        "elements": [
+          {
+            "name": "value",
+            "type": {
+              "type-name": "Field"
+            }
+          },
+          {
+            "name": "nonce",
+            "type": {
+              "type-name": "Field"
+            }
+          },
+          {
+            "name": "ownerPk",
+            "type": {
+              "type-name": "Field"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "witnesses": [
+    {
+      "name": "wit_SecretKey",
+      "arguments": [
+      ],
+      "result type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "wit_InputNote",
+      "arguments": [
+      ],
+      "result type": {
+        "type-name": "Struct",
+        "name": "Note",
+        "elements": [
+          {
+            "name": "value",
+            "type": {
+              "type-name": "Uint",
+              "maxval": 340282366920938463463374607431768211455
+            }
+          },
+          {
+            "name": "nonce",
+            "type": {
+              "type-name": "Field"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "wit_Path",
+      "arguments": [
+        {
+          "name": "cm",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        }
+      ],
+      "result type": {
+        "type-name": "Struct",
+        "name": "MerkleTreePath",
+        "elements": [
+          {
+            "name": "leaf",
+            "type": {
+              "type-name": "Bytes",
+              "length": 32
+            }
+          },
+          {
+            "name": "path",
+            "type": {
+              "type-name": "Vector",
+              "length": 32,
+              "type": {
+                "type-name": "Struct",
+                "name": "MerkleTreePathEntry",
+                "elements": [
+                  {
+                    "name": "sibling",
+                    "type": {
+                      "type-name": "Struct",
+                      "name": "MerkleTreeDigest",
+                      "elements": [
+                        {
+                          "name": "field",
+                          "type": {
+                            "type-name": "Field"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "name": "goes_left",
+                    "type": {
+                      "type-name": "Boolean"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "wit_IssuerSecret",
+      "arguments": [
+      ],
+      "result type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "wit_AuthoritySecret",
+      "arguments": [
+      ],
+      "result type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "wit_AuditRandomness",
+      "arguments": [
+      ],
+      "result type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "wit_DeliveryRandomness",
+      "arguments": [
+      ],
+      "result type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "wit_SupplyRandomness",
+      "arguments": [
+      ],
+      "result type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    }
+  ],
+  "contracts": [
+  ],
+  "ledger": [
+    {
+      "name": "_isInitialized",
+      "index": [
+        0,
+        0
+      ],
+      "exported": false,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Boolean"
+      }
+    },
+    {
+      "name": "_seizureCount",
+      "index": [
+        0,
+        1
+      ],
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Uint",
+        "maxval": 18446744073709551615
+      }
+    },
+    {
+      "name": "_commitments",
+      "index": [
+        0,
+        2
+      ],
+      "exported": true,
+      "storage": "HistoricMerkleTree",
+      "depth": 32,
+      "type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "_nullifiers",
+      "index": [
+        0,
+        3
+      ],
+      "exported": true,
+      "storage": "Set",
+      "type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "_isInitialized",
+      "index": [
+        0,
+        4
+      ],
+      "exported": false,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Boolean"
+      }
+    },
+    {
+      "name": "_issuerPk",
+      "index": [
+        0,
+        5
+      ],
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Field"
+      }
+    },
+    {
+      "name": "_isInitialized",
+      "index": [
+        0,
+        6
+      ],
+      "exported": false,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Boolean"
+      }
+    },
+    {
+      "name": "_authorityPk",
+      "index": [
+        0,
+        7
+      ],
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Field"
+      }
+    },
+    {
+      "name": "_isInitialized",
+      "index": [
+        1,
+        0
+      ],
+      "exported": false,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Boolean"
+      }
+    },
+    {
+      "name": "_auditKey",
+      "index": [
+        1,
+        1
+      ],
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Alias",
+        "name": "JubjubPoint",
+        "type": {
+          "type-name": "Opaque",
+          "tsType": "JubjubPoint"
+        }
+      }
+    },
+    {
+      "name": "_auditTrail",
+      "index": [
+        1,
+        2
+      ],
+      "exported": true,
+      "storage": "List",
+      "type": {
+        "type-name": "Struct",
+        "name": "AuditRecord",
+        "elements": [
+          {
+            "name": "ephemeralPk",
+            "type": {
+              "type-name": "Alias",
+              "name": "JubjubPoint",
+              "type": {
+                "type-name": "Opaque",
+                "tsType": "JubjubPoint"
+              }
+            }
+          },
+          {
+            "name": "valueCt",
+            "type": {
+              "type-name": "Field"
+            }
+          },
+          {
+            "name": "ownerCt",
+            "type": {
+              "type-name": "Field"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "_deliveries",
+      "index": [
+        1,
+        3
+      ],
+      "exported": true,
+      "storage": "List",
+      "type": {
+        "type-name": "Struct",
+        "name": "FullDelivery",
+        "elements": [
+          {
+            "name": "ephemeral",
+            "type": {
+              "type-name": "Alias",
+              "name": "JubjubPoint",
+              "type": {
+                "type-name": "Opaque",
+                "tsType": "JubjubPoint"
+              }
+            }
+          },
+          {
+            "name": "valueCt",
+            "type": {
+              "type-name": "Field"
+            }
+          },
+          {
+            "name": "nonceCt",
+            "type": {
+              "type-name": "Field"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "_isInitialized",
+      "index": [
+        1,
+        4
+      ],
+      "exported": false,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Boolean"
+      }
+    },
+    {
+      "name": "_supplyKey",
+      "index": [
+        1,
+        5
+      ],
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Alias",
+        "name": "JubjubPoint",
+        "type": {
+          "type-name": "Opaque",
+          "tsType": "JubjubPoint"
+        }
+      }
+    },
+    {
+      "name": "_encSupply",
+      "index": [
+        1,
+        6
+      ],
+      "exported": true,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Struct",
+        "name": "Ciphertext",
+        "elements": [
+          {
+            "name": "c1",
+            "type": {
+              "type-name": "Alias",
+              "name": "JubjubPoint",
+              "type": {
+                "type-name": "Opaque",
+                "tsType": "JubjubPoint"
+              }
+            }
+          },
+          {
+            "name": "c2",
+            "type": {
+              "type-name": "Alias",
+              "name": "JubjubPoint",
+              "type": {
+                "type-name": "Opaque",
+                "tsType": "JubjubPoint"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "_attestedSupply",
+      "index": [
+        1,
+        7
+      ],
+      "exported": false,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Uint",
+        "maxval": 340282366920938463463374607431768211455
+      }
+    },
+    {
+      "name": "_attestationCount",
+      "index": [
+        1,
+        8
+      ],
+      "exported": false,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Uint",
+        "maxval": 18446744073709551615
+      }
+    },
+    {
+      "name": "_frozen",
+      "index": [
+        1,
+        9
+      ],
+      "exported": true,
+      "storage": "Set",
+      "type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "_commitments",
+      "index": [
+        1,
+        10
+      ],
+      "exported": false,
+      "storage": "HistoricMerkleTree",
+      "depth": 32,
+      "type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "_nullifiers",
+      "index": [
+        1,
+        11
+      ],
+      "exported": false,
+      "storage": "Set",
+      "type": {
+        "type-name": "Bytes",
+        "length": 32
+      }
+    },
+    {
+      "name": "_isInitialized",
+      "index": [
+        1,
+        12
+      ],
+      "exported": false,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Boolean"
+      }
+    },
+    {
+      "name": "_auditKey",
+      "index": [
+        1,
+        13
+      ],
+      "exported": false,
+      "storage": "Cell",
+      "type": {
+        "type-name": "Alias",
+        "name": "JubjubPoint",
+        "type": {
+          "type-name": "Opaque",
+          "tsType": "JubjubPoint"
+        }
+      }
+    },
+    {
+      "name": "_auditTrail",
+      "index": [
+        1,
+        14
+      ],
+      "exported": false,
+      "storage": "List",
+      "type": {
+        "type-name": "Struct",
+        "name": "AuditRecord",
+        "elements": [
+          {
+            "name": "ephemeralPk",
+            "type": {
+              "type-name": "Alias",
+              "name": "JubjubPoint",
+              "type": {
+                "type-name": "Opaque",
+                "tsType": "JubjubPoint"
+              }
+            }
+          },
+          {
+            "name": "valueCt",
+            "type": {
+              "type-name": "Field"
+            }
+          },
+          {
+            "name": "ownerCt",
+            "type": {
+              "type-name": "Field"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

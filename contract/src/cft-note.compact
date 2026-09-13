@@ -1,0 +1,160 @@
+// SPDX-License-Identifier: MIT
+//
+// CFT Demo, note model: OpenZeppelin's draft ConfidentialNoteFungibleToken
+// (branch feat/hybrid-confidential-token, "tier-4 notes model", unaudited),
+// vendored under ./oz-note and exposed with a lean surface.
+//
+// Compared with the account-model CFT in cft-demo.compact:
+//
+//   * A balance is a set of NOTES (value, nonce) committed in a Merkle tree
+//     and spent by publishing a nullifier. Sender, recipient AND amount are
+//     hidden from the public ledger; only commitments, nullifiers and
+//     ciphertexts are written.
+//   * Compliance is structural, not bolted on: every output note's nonce is
+//     derived from an ECDH with the AUDIT KEY and its (owner, value) are
+//     encrypted to that key in the same circuit, so an output the auditor
+//     cannot open cannot exist. The auditor therefore reconstructs the whole
+//     graph and, knowing every nonce, can derive every nullifier.
+//   * That is what arms enforcement: the AUTHORITY freezes a note by its
+//     nullifier (reversible) or seizes it outright, with no cooperation from
+//     the owner and no escrowed spend keys.
+//   * Supply is encrypted (ElGamal) rather than public.
+//
+// Roles (all bound at deploy): issuer (mint), authority (freeze / seize),
+// audit-key holder (read everything), supply-key holder (attest supply).
+// The demo's deployer holds all four; a real deployment separates them.
+//
+// Surface kept to five impure circuits (~2.3 KB of verifier key each in the
+// deploy transaction; the block write budget is 50,000 bytes and a
+// twelve-circuit CFT deploy was already rejected): mint, transfer, burn,
+// seize, setFrozen. Key rotation and supply attestation are left out.
+//
+// Circuit sizes (from the OZ source annotations): transfer k=18, mint /
+// burn / seize k=17, setFrozen k=13. Prover keys: 85 MB, 43 MB x3, 3 MB.
+
+pragma language_version >= 0.23.0;
+
+import CompactStandardLibrary;
+
+import "./oz-note/token/presets/RegulatedConfidentialNoteFungibleToken" prefix Token_;
+import "./oz-note/token/ConfidentialNoteFungibleToken" prefix Core_;
+import "./oz-note/token/extensions/ConfidentialNoteFungibleTokenAudit" prefix Audit_;
+import "./oz-note/crypto/NoteDelivery" prefix NoteDelivery_;
+import {
+  Note,
+  AuditRecord,
+  AuditView,
+  FullDelivery,
+  _issuerPk,
+  _authorityPk,
+  _seizureCount,
+  _commitments,
+  _nullifiers,
+  _frozen,
+  _auditKey,
+  _auditTrail,
+  _deliveries,
+  _supplyKey,
+  _encSupply
+} from "./oz-note/token/presets/RegulatedConfidentialNoteFungibleToken";
+
+export { Note, AuditRecord, AuditView, FullDelivery, NoteDelivery_Recovered };
+
+// Public ledger surface, read off-chain.
+export {
+  _issuerPk,
+  _authorityPk,
+  _seizureCount,
+  _commitments,
+  _nullifiers,
+  _frozen,
+  _auditKey,
+  _auditTrail,
+  _deliveries,
+  _supplyKey,
+  _encSupply
+};
+
+constructor(
+  issuerPk: Field,
+  authorityPk: Field,
+  auditKey: JubjubPoint,
+  supplyKey: JubjubPoint
+) {
+  Token_initialize(issuerPk, authorityPk, auditKey, supplyKey);
+}
+
+// ── Value movement ─────────────────────────────────────────────────────────
+
+/** Issuer-only. Creates one note for `recipientPk`, delivered to `recipientEncPk`. */
+export circuit mint(recipientPk: Field, recipientEncPk: JubjubPoint, value: Uint<128>): [] {
+  return Token_mint(recipientPk, recipientEncPk, value);
+}
+
+/**
+ * Spends the caller's ONE input note (witness), pays `value` to the recipient
+ * and returns the change to the caller as a new note. Fully private on-chain.
+ */
+export circuit transfer(
+  recipientPk: Field,
+  recipientEncPk: JubjubPoint,
+  senderEncPk: JubjubPoint,
+  value: Uint<128>
+): [] {
+  return Token_transfer(recipientPk, recipientEncPk, senderEncPk, value);
+}
+
+/** Spends the caller's input note, burns `value`, returns the change as a note. */
+export circuit burn(senderEncPk: JubjubPoint, value: Uint<128>): [] {
+  return Token_burn(senderEncPk, value);
+}
+
+// ── Enforcement (authority) ────────────────────────────────────────────────
+
+/**
+ * Authority-only. Consumes the target note (supplied as the input-note
+ * witness, learned from the audit trail) and re-mints its value to a recovery
+ * owner. Works on frozen notes; needs no cooperation from the owner.
+ */
+export circuit seize(targetOwnerPk: Field, recoveryPk: Field, recoveryEncPk: JubjubPoint): [] {
+  return Token_seize(targetOwnerPk, recoveryPk, recoveryEncPk);
+}
+
+/** Authority-only. Freeze (true) or unfreeze (false) the note behind nullifier `nf`. */
+export circuit setFrozen(nf: Bytes<32>, isFrozen: Boolean): [] {
+  if (disclose(isFrozen)) {
+    Token_freeze(nf);
+  } else {
+    Token_unfreeze(nf);
+  }
+}
+
+// ── Pure helpers for wallets, recipients and the auditor (no proof) ───────
+
+/** Spend identity: pk = Hf(sk). */
+export pure circuit derivePk(sk: Bytes<32>): Field {
+  return Core_derivePk(sk);
+}
+
+/** Delivery identity: encPk = g^encSk. */
+export pure circuit encPkOf(encSk: Field): JubjubPoint {
+  return ecMulGenerator(encSk);
+}
+
+export pure circuit commitOf(note: Note, pk: Field): Bytes<32> {
+  return Core_commitOf(note, pk);
+}
+
+export pure circuit nullifierOf(note: Note): Bytes<32> {
+  return Core_nullifierOf(note);
+}
+
+/** Recipient side: open a delivery with the delivery secret; yields (value, nonce). */
+export pure circuit recoverNote(delivery: FullDelivery, encSk: Field): NoteDelivery_Recovered {
+  return NoteDelivery_recoverNote(delivery, encSk);
+}
+
+/** Auditor side: open an audit record; yields (value, nonce, ownerPk) of that output. */
+export pure circuit recoverAuditRecord(record: AuditRecord, auditSk: Field): AuditView {
+  return Audit_recoverAuditRecord(record, auditSk);
+}

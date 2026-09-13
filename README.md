@@ -112,12 +112,39 @@ under a disclosed viewing key) while **holders need amount privacy** from
 other participants. Viewing keys give auditors, tax authorities or the issuer
 read access per account without a global backdoor.
 
+## Two token models in one demo
+
+| | Account model (`cft-demo.compact`) | Note model (`cft-note.compact`) |
+|---|---|---|
+| OZ source | `ConfidentialFungibleToken`, tag v0.3.0-alpha.2 | `ConfidentialNoteFungibleToken` + extensions, branch `feat/hybrid-confidential-token` (draft) |
+| State | encrypted balance per public accountId | notes (value, nonce) in a Merkle tree, spent by nullifier |
+| Public sees | who paid whom, total supply, freeze/onboard flags | commitments, nullifiers, ciphertexts only; supply encrypted |
+| Amounts | hidden (mint/burn leak via supply) | hidden, including mint and burn |
+| Compliance | per-account: onboarding allowlist, freeze, viewing-key seize | structural: mandatory audit channel; authority freezes/seizes single notes with no key escrow |
+| Viewing | holder discloses EK at onboarding | audit key opens every output by construction |
+| Circuits | 9 (k up to 16), deploy 24 KB | 5 (transfer k=18), deploy ~12 KB; prover keys 222 MB |
+| Wallet | cache + memos, one balance | scan deliveries, one input note per spend, change note |
+
+Pick the model by whether the transaction graph may be public. The web UI
+deploys either (panel 2, "model") and detects which one an address is when
+joining. The note-model deployer holds the issuer, authority, audit and
+supply-key roles; a real deployment separates them.
+
+Note-model specifics: a payment address is a spend key plus a delivery key
+(panel 3, "copy address"); there is no registration. A payment consumes one
+note and returns change as a new note, so the largest single payment is the
+largest note you hold. Proving a transfer (k=18) takes about a minute on a
+local proof server; the wallet has to fetch an 85 MB prover key first.
+Headless check: `npm run e2e-note:standalone`.
+
 ## What is OpenZeppelin's and what is this project's
 
 ### From OpenZeppelin (vendored, unmodified, MIT)
 
-Everything under `contract/src/oz/`, copied from `OpenZeppelin/compact-contracts`
-tag `v0.3.0-alpha.2`:
+Everything under `contract/src/oz/` (account model, tag `v0.3.0-alpha.2`) and
+`contract/src/oz-note/` (note model, branch `feat/hybrid-confidential-token`
+at `bdf8b5cd`, 2026-07-24, draft and unaudited), copied from
+`OpenZeppelin/compact-contracts`:
 
 | File | What it provides |
 |---|---|
@@ -134,6 +161,12 @@ comes from there. These files are not edited; the only difference from OZ
 
 ### Written for this project
 
+- **Note wrapper** (`contract/src/cft-note.compact`) and **note wallet layer**
+  (`contract/src/note/`): five-circuit surface over OZ's regulated preset;
+  identities and payment addresses, delivery scanning, input-note selection,
+  the auditor's view, and the witnesses (fresh randomness per call, Merkle
+  path from the live ledger). Plus the Merkle-tree rehash wrapper the indexer
+  decode needs (`contract/src/bmt-rehash.ts`).
 - **Contract wrapper** (`contract/src/cft-demo.compact`): composes the OZ
   modules and adds the compliance policy the CFT deliberately leaves to the
   deployer: the onboarding allowlist gating `register`; issuer-gated `mint`
