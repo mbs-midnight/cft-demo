@@ -117,12 +117,8 @@ export const joinNote = async (providers: NoteProviders, contractAddress: string
   const address = contractAddress.trim() as ContractAddress;
   providers.privateStateProvider.setContractAddress(address);
   const stored = await providers.privateStateProvider.get(NOTE_PRIVATE_STATE_ID);
-  return findDeployedContract(
-    providers,
-    stored
-      ? { contractAddress: address, compiledContract: noteCompiledContract, privateStateId: NOTE_PRIVATE_STATE_ID }
-      : { contractAddress: address, compiledContract: noteCompiledContract, privateStateId: NOTE_PRIVATE_STATE_ID, initialPrivateState: state },
-  );
+  if (stored) return findDeployedContract(providers, { contractAddress: address, compiledContract: noteCompiledContract, privateStateId: NOTE_PRIVATE_STATE_ID });
+  return findDeployedContract(providers, { contractAddress: address, compiledContract: noteCompiledContract, privateStateId: NOTE_PRIVATE_STATE_ID, initialPrivateState: state });
 };
 
 const receipt = (tx: FinalizedTxData): TxReceipt => ({ txId: tx.txId, blockHeight: Number(tx.blockHeight) });

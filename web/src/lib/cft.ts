@@ -145,12 +145,8 @@ export const join = async (providers: CftProviders, contractAddress: string, sta
   const address = contractAddress.trim() as ContractAddress;
   providers.privateStateProvider.setContractAddress(address);
   const stored = await providers.privateStateProvider.get(PRIVATE_STATE_ID);
-  return findDeployedContract(
-    providers,
-    stored
-      ? { contractAddress: address, compiledContract, privateStateId: PRIVATE_STATE_ID }
-      : { contractAddress: address, compiledContract, privateStateId: PRIVATE_STATE_ID, initialPrivateState: state },
-  );
+  if (stored) return findDeployedContract(providers, { contractAddress: address, compiledContract, privateStateId: PRIVATE_STATE_ID });
+  return findDeployedContract(providers, { contractAddress: address, compiledContract, privateStateId: PRIVATE_STATE_ID, initialPrivateState: state });
 };
 
 export interface TxReceipt {
