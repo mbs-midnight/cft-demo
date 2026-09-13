@@ -234,7 +234,32 @@ export class CftClient {
     const ek = s.encryptionKeyHex;
     const memos = view.registered ? memoHistory(view, ek) : [];
     const pe = resolvePending(view, ek);
-    const sp = resolveSpendable(view, ek, s);
+    let sp = resolveSpendable(view, ek, s);
+    if (sp.value === undefined && view.spendableCt && pe.value !== undefined && Object.keys(s.viewingKeys).length > 0) {
+      // Issuer reconciliation: totalSupply is public and the issuer holds the
+      // viewing keys of every onboarded holder, so its own spendable is the
+      // supply minus everyone else's balance minus its own pending. Verified
+      // against the ciphertext like any other candidate.
+      const ledger = await this.ledger();
+      let others = 0n;
+      let complete = true;
+      for (const [acct, vk] of Object.entries(s.viewingKeys)) {
+        if (acct === this.accountId) continue;
+        const v = readAccount(ledger, acct);
+        if (!v.registered) continue;
+        const osp = resolveSpendable(v, vk);
+        const ope = resolvePending(v, vk);
+        if (osp.value === undefined || ope.value === undefined) {
+          complete = false;
+          break;
+        }
+        others += osp.value + ope.value;
+      }
+      if (complete) {
+        const candidate = ledger.Supply__totalSupply - others - pe.value;
+        if (candidate >= 0n && verifyBalance(view.spendableCt, fromHex(ek), candidate)) sp = { value: candidate, source: 'candidate' };
+      }
+    }
     if (view.spendableCt && sp.value !== undefined) s = CftPrivateState.cachePlaintext(s, view.spendableCt, sp.value);
     if (view.pendingCt && pe.value !== undefined) s = CftPrivateState.cachePlaintext(s, view.pendingCt, pe.value);
     await this.setState(s);

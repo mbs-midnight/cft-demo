@@ -48,7 +48,7 @@ const SOURCE_LABEL: Record<string, string> = {
   cache: 'from wallet cache',
   zero: '',
   memos: 'from memos',
-  candidate: 'from your last move, verified',
+  candidate: 'verified (own move or supply reconciliation)',
   recovered: 'recovered from ciphertext',
   unknown: 'unknown',
 };
@@ -681,7 +681,10 @@ export default function App() {
                   {balances.spendable === undefined && (
                     <div className="row" style={{ alignItems: 'flex-end' }}>
                       <div>
-                        <label>This browser has no record of your spendable balance. Enter it (it is verified before use):</label>
+                        <label>
+                          This browser has no record of your spendable balance and it could not be reconstructed (memos, supply
+                          reconciliation, bounded recovery). Enter the net amount you hold; it is verified before use, a wrong value is refused:
+                        </label>
                         <input style={{ width: 160 }} value={knownBalance} onChange={(e) => setKnownBalance(e.target.value)} placeholder="e.g. 1000000" />
                       </div>
                       <button
