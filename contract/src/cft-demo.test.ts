@@ -231,6 +231,16 @@ describe('CFT demo: lifecycle', () => {
     expect(verifyBalance(view.spendableCt!, fromHex(alice.state.encryptionKeyHex), big - 5n)).toBe(true);
   });
 
+  it('a never-spent account recovers its spendable from memos alone, above the recovery bound', () => {
+    const { sim, issuer, alice } = setup();
+    const big = 10n ** 13n; // 10,000,000.0000 at 4 decimals: far above 2^32 units
+    sim.mint(issuer, alice, big);
+    sim.sweep(alice);
+    alice.state = { ...alice.state, plaintextCache: {}, spendableCandidates: [] };
+    const view = readAccount(sim.ledger(), alice.id);
+    expect(resolveSpendable(view, alice.state.encryptionKeyHex, alice.state)).toEqual({ value: big, source: 'memos' });
+  });
+
   it('recovers a balance from the ciphertext alone when the cache is lost', () => {
     const { sim, issuer, alice } = setup();
     sim.mint(issuer, alice, 123_456_789n); // > 2^16, exercises giant steps

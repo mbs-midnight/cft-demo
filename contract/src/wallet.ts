@@ -123,14 +123,23 @@ export const resolvePending = (view: AccountView, ekHex: string): ResolvedBalanc
 export const resolveSpendable = (view: AccountView, ekHex: string, state?: CftPrivateState): ResolvedBalance => {
   const ct = view.spendableCt;
   if (!ct || isZeroCiphertext(ct)) return { value: 0n, source: 'zero' };
+  const ek = fromHex(ekHex);
   if (state) {
     const cached = CftPrivateState.lookupPlaintext(state, ct);
     if (cached !== undefined) return { value: cached, source: 'cache' };
-    const ek = fromHex(ekHex);
     for (const c of state.spendableCandidates ?? []) {
       const v = BigInt(c);
       if (verifyBalance(ct, ek, v)) return { value: v, source: 'candidate' };
     }
+  }
+  // An account that has swept everything it received and never spent holds
+  // exactly the sum of its memos, which are readable with no bound. Try that
+  // (and the sum minus the newest credit, for a credit still pending) before
+  // falling back to bounded recovery.
+  const memoValues = view.memos.map((m) => decryptMemo(m, ek));
+  const total = memoValues.reduce((a, v) => a + v, 0n);
+  for (const candidate of [total, total - (memoValues[0] ?? 0n)]) {
+    if (candidate > 0n && verifyBalance(ct, ek, candidate)) return { value: candidate, source: 'memos' };
   }
   return resolveBalance(ct, ekHex);
 };
