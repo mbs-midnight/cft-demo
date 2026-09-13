@@ -112,13 +112,18 @@ export const deployNote = (providers: NoteProviders, deployer: NotePrivateState)
   });
 };
 
-export const joinNote = (providers: NoteProviders, contractAddress: string, state: NotePrivateState): Promise<DeployedNote> =>
-  findDeployedContract(providers, {
-    contractAddress: contractAddress as ContractAddress,
-    compiledContract: noteCompiledContract,
-    privateStateId: NOTE_PRIVATE_STATE_ID,
-    initialPrivateState: state,
-  });
+/** Join without clobbering stored private state (see cft.ts `join`). */
+export const joinNote = async (providers: NoteProviders, contractAddress: string, state: NotePrivateState): Promise<DeployedNote> => {
+  const address = contractAddress.trim() as ContractAddress;
+  providers.privateStateProvider.setContractAddress(address);
+  const stored = await providers.privateStateProvider.get(NOTE_PRIVATE_STATE_ID);
+  return findDeployedContract(
+    providers,
+    stored
+      ? { contractAddress: address, compiledContract: noteCompiledContract, privateStateId: NOTE_PRIVATE_STATE_ID }
+      : { contractAddress: address, compiledContract: noteCompiledContract, privateStateId: NOTE_PRIVATE_STATE_ID, initialPrivateState: state },
+  );
+};
 
 const receipt = (tx: FinalizedTxData): TxReceipt => ({ txId: tx.txId, blockHeight: Number(tx.blockHeight) });
 

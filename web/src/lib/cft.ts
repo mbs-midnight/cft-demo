@@ -135,13 +135,23 @@ export const deploy = (
     args: [name, symbol, decimals, accountIdFromSecretKey(fromHex(issuerState.secretKeyHex))],
   });
 
-export const join = (providers: CftProviders, contractAddress: string, state: CftPrivateState): Promise<DeployedCft> =>
-  findDeployedContract(providers, {
-    contractAddress: contractAddress as ContractAddress,
-    compiledContract,
-    privateStateId: PRIVATE_STATE_ID,
-    initialPrivateState: state,
-  });
+/**
+ * Join an existing contract WITHOUT clobbering what this browser already knows.
+ * midnight-js overwrites the stored private state whenever `initialPrivateState`
+ * is passed together with `privateStateId`, so pass it only when nothing is
+ * stored yet (first join from this wallet).
+ */
+export const join = async (providers: CftProviders, contractAddress: string, state: CftPrivateState): Promise<DeployedCft> => {
+  const address = contractAddress.trim() as ContractAddress;
+  providers.privateStateProvider.setContractAddress(address);
+  const stored = await providers.privateStateProvider.get(PRIVATE_STATE_ID);
+  return findDeployedContract(
+    providers,
+    stored
+      ? { contractAddress: address, compiledContract, privateStateId: PRIVATE_STATE_ID }
+      : { contractAddress: address, compiledContract, privateStateId: PRIVATE_STATE_ID, initialPrivateState: state },
+  );
+};
 
 export interface TxReceipt {
   txId: string;
@@ -328,6 +338,11 @@ export class CftClient {
   async offboard(account: string): Promise<TxReceipt> {
     await this.rotateSeed();
     return receipt((await this.contract.callTx.setOnboarded(fromHex(account), false)).public);
+  }
+
+  /** Store a holder's viewing key locally (no transaction), e.g. to restore one after a reset. */
+  async storeViewingKey(vk: ViewingKeyExport): Promise<void> {
+    await this.setState(CftPrivateState.withViewingKey(await this.state(), vk.accountId, vk.viewingKey));
   }
 
   /** Viewing keys collected at onboarding, by accountId. */

@@ -95,17 +95,22 @@ export const deploy = async (
   });
 };
 
+/** Join without clobbering stored private state: midnight-js overwrites it when initialPrivateState is passed. */
 export const join = async (
   providers: CftProviders,
   contractAddress: string,
   initialPrivateState: CftPrivateState,
-): Promise<DeployedCft> =>
-  findDeployedContract(providers, {
-    contractAddress: contractAddress as ContractAddress,
-    compiledContract,
-    privateStateId: PRIVATE_STATE_ID,
-    initialPrivateState,
-  });
+): Promise<DeployedCft> => {
+  const address = contractAddress as ContractAddress;
+  providers.privateStateProvider.setContractAddress(address);
+  const stored = await providers.privateStateProvider.get(PRIVATE_STATE_ID);
+  return findDeployedContract(
+    providers,
+    stored
+      ? { contractAddress: address, compiledContract, privateStateId: PRIVATE_STATE_ID }
+      : { contractAddress: address, compiledContract, privateStateId: PRIVATE_STATE_ID, initialPrivateState },
+  );
+};
 
 export interface TxReceipt {
   txId: string;

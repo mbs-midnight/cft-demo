@@ -792,6 +792,21 @@ export default function App() {
             >
               Onboard
             </button>
+            <button
+              className="secondary"
+              onClick={() =>
+                run('Store viewing key', async () => {
+                  if (!client) throw new Error('join a token first');
+                  await client.storeViewingKey(parseViewingKey(onboardKey));
+                  setOnboardKey('');
+                  await refresh();
+                })
+              }
+              disabled={!isIssuer || !onboardKey || !!busy}
+              title="Store the key in this browser without a transaction (for an account that is already onboarded)"
+            >
+              Store key only
+            </button>
           </div>
           <p className="hint">Stores the viewing key in your issuer state and allowlists the accountId on-chain, so the holder can register.</p>
           {isIssuer && token && token.allowlist.length > 0 && (
