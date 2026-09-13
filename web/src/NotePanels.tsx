@@ -216,6 +216,16 @@ export function NotePanels({ client, network, decimals, busy, lastTxHash, run, t
           )}
         </div>
 
+        <div className="subsection killswitch">
+          <h3>
+            Freeze &amp; seize <span className="scope global">authority</span>
+          </h3>
+          <p className="hint">
+            Both act on ONE note, picked from the audit trail below. {roles.authority ? 'You hold the authority role: each live note has freeze and seize buttons.' : 'You do not hold the authority role, so the buttons are not shown.'}{' '}
+            Freeze publishes the note's nullifier (reversible). Seize consumes the note and re-mints its value to you, with no owner cooperation and no key escrow.
+          </p>
+          {audit && roles.authority && audit.filter((a) => !a.spent).length === 0 && <p className="hint">No live notes to act on yet.</p>}
+        </div>
         <div className="subsection">
           <h3>Audit trail <span className="scope">auditor</span></h3>
           <p className="hint">
@@ -251,9 +261,12 @@ export function NotePanels({ client, network, decimals, busy, lastTxHash, run, t
             ))}
           </div>
         )}
-        <p className="hint" style={{ marginTop: 8 }}>
-          <b>Freeze</b> publishes the note's nullifier (reversible, nothing else revealed). <b>Seize</b> consumes the note and re-mints its value to the authority, with no cooperation from the owner and no key escrow: the audit trail alone supplies the witnesses.
-        </p>
+        {!roles.issuer && !roles.authority && !roles.auditor && (
+          <p className="hint" style={{ marginTop: 8 }}>
+            This browser's identity holds none of the roles for this contract. Roles are bound to the deployer's identity at deploy time; open
+            this contract from the browser that deployed it (same wallet) to mint, audit, freeze or seize.
+          </p>
+        )}
       </section>
 
       {/* ── Observer ────────────────────────────────────────────────────── */}

@@ -956,30 +956,56 @@ export default function App() {
                   <dd>{inspection.memos.length ? inspection.memos.map((m) => `+${fmt(m)}`).join(', ') : 'none'}</dd>
                 </dl>
               )}
-              {isIssuer && inspection && inspectionVk && (
-                <div style={{ marginTop: 12 }}>
-                  <label>Seize entire balance to treasury accountId (default: you). Must be a different, registered account.</label>
-                  <div className="row">
-                    <input className="grow" value={seizeTo} onChange={(e) => setSeizeTo(e.target.value)} placeholder={client?.accountId} />
-                    <button
-                      className="danger"
-                      disabled={!inspection.view.frozen || inspection.total === undefined || seizeSelf || !!busy}
-                      onClick={() =>
-                        tx(`Seize ${fmt(inspection.total)}`, (c) => c.seize(inspectionVk, seizeTo.trim() || c.accountId, claimed))
-                      }
-                    >
-                      Seize
-                    </button>
-                    {!inspection.view.frozen && <span className="pill warn">freeze the account first (panel 5)</span>}
-                    {seizeSelf && (
-                      <span className="pill warn">this is your own account: seizing it into itself is refused by the contract; enter another accountId</span>
-                    )}
-                    {inspection.view.frozen && inspection.total === undefined && <span className="pill warn">balance unknown: enter the claimed spendable</span>}
-                  </div>
-                  <p className="hint">
-                    The circuit proves the viewing key opens the frozen balance to exactly this amount, zeroes the account and credits the
-                    treasury. Total supply is unchanged; the amount is not revealed on-chain.
-                  </p>
+              {isIssuer && (
+                <div style={{ marginTop: 12 }} className="subsection killswitch">
+                  <h3>
+                    Seize <span className="scope global">issuer · needs viewing key</span>
+                  </h3>
+                  {!inspection || !inspectionVk ? (
+                    <p className="hint">
+                      Inspect the holder first: pick an onboarded account in panel 5 ("load key in panel 6") or paste their viewing key
+                      above, then click <b>Inspect account</b>. Seize moves the whole balance to a treasury account.
+                    </p>
+                  ) : (
+                    <>
+                      <label>Seize entire balance to treasury accountId (default: you). Must be a different, registered account.</label>
+                      <div className="row">
+                        <input className="grow" value={seizeTo} onChange={(e) => setSeizeTo(e.target.value)} placeholder={client?.accountId} />
+                        <button
+                          className="danger"
+                          disabled={!inspection.view.frozen || inspection.total === undefined || seizeSelf || !!busy}
+                          onClick={() =>
+                            tx(`Seize ${fmt(inspection.total)}`, (c) => c.seize(inspectionVk, seizeTo.trim() || c.accountId, claimed))
+                          }
+                        >
+                          Seize {fmt(inspection.total)} {symbol}
+                        </button>
+                      </div>
+                      <ul className="plain">
+                        <li>
+                          {inspection.view.frozen ? <span className="pill good">account is frozen</span> : <span className="pill warn">not frozen: freeze it in panel 5 first</span>}
+                        </li>
+                        <li>
+                          {inspection.total !== undefined ? (
+                            <span className="pill good">balance known: {fmt(inspection.total)}</span>
+                          ) : (
+                            <span className="pill warn">balance unknown: enter the holder-claimed spendable above and Inspect again</span>
+                          )}
+                        </li>
+                        <li>
+                          {seizeSelf ? (
+                            <span className="pill warn">treasury equals the seized account: enter a different accountId</span>
+                          ) : (
+                            <span className="pill good">treasury: {short(seizeTo.trim() || client?.accountId || '', 8)}</span>
+                          )}
+                        </li>
+                      </ul>
+                      <p className="hint">
+                        The circuit proves the viewing key opens the frozen balance to exactly this amount, zeroes the account and credits
+                        the treasury. Total supply is unchanged; the amount is not revealed on-chain.
+                      </p>
+                    </>
+                  )}
                 </div>
               )}
             </div>
