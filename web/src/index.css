@@ -540,3 +540,7 @@ ol.steps .mark {
   font-weight: 600;
   color: var(--accent-2);
 }
+
+.banner.err {
+  white-space: pre-line;
+}

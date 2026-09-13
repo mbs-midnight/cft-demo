@@ -30,6 +30,20 @@ type LogLine = { t: string; msg: string; kind: 'info' | 'ok' | 'err' };
 
 const short = (s: string, n = 10) => (s.length > 2 * n ? `${s.slice(0, n)}…${s.slice(-n)}` : s);
 
+/** Ledger error codes seen in practice, translated. The raw text is kept. */
+const explainError = (raw: string): string => {
+  if (/Custom error: 170/.test(raw)) {
+    return (
+      `${raw}\n→ The node rejected the DUST fee proof that the wallet attached (ledger error 170, InvalidDustSpendProof). ` +
+      'The contract proof was fine. Usual causes: the wallet\'s DUST state is stale (open the wallet, let it resync, retry), ' +
+      'or the wallet/proof server proves against a different ledger version than the network. ' +
+      'If it persists, reload, choose "Proof server" in panel 1 with the local Docker prover, and reconnect.'
+    );
+  }
+  if (/exhaust the block limits/.test(raw)) return `${raw}\n→ The transaction is over the per-block write budget (too many circuits in one deploy).`;
+  return raw;
+};
+
 const SOURCE_LABEL: Record<string, string> = {
   cache: 'from wallet cache',
   zero: '',
@@ -131,7 +145,8 @@ export default function App() {
       if (after) await after(r);
       say(`${label}: done`, 'ok');
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const raw = e instanceof Error ? e.message : String(e);
+      const msg = explainError(raw);
       setLastError(`${label}: ${msg}`);
       say(`${label}: ${msg}`, 'err');
     } finally {
