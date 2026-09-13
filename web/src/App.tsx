@@ -159,9 +159,9 @@ export default function App() {
       if (!c) return;
       const t = await c.token();
       setToken(t);
+      setStoredKeys(await c.storedViewingKeys().catch(() => []));
       try {
         setBalances(await c.balances());
-        setStoredKeys(await c.storedViewingKeys());
       } catch (e) {
         say(`balance sync: ${e instanceof Error ? e.message : String(e)}`, 'err');
       }
@@ -811,7 +811,9 @@ export default function App() {
           <p className="hint">Stores the viewing key in your issuer state and allowlists the accountId on-chain, so the holder can register.</p>
           {isIssuer && token && token.allowlist.length > 0 && (
             <>
-              <label>Onboarded accounts</label>
+              <label>
+                Onboarded accounts ({storedKeys.filter((k) => k.accountId !== client?.accountId).length} viewing key(s) stored in this browser)
+              </label>
               <ul className="plain mono">
                 {token.allowlist.map((a) => {
                   const stored = storedKeys.find((k) => k.accountId === a);
