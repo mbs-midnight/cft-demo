@@ -63,8 +63,52 @@ export function NotePanels({ client, network, decimals, busy, lastTxHash, run, t
 
   const live = view?.notes.filter((n) => !n.spent) ?? [];
 
+  const spent = view?.notes.filter((n) => n.spent).length ?? 0;
+
   return (
     <>
+      {/* ── How it works ────────────────────────────────────────────────── */}
+      <section className="panel wide explainer">
+        <h2>How the note model works</h2>
+        <div className="flow">
+          <div className="flow-step">
+            <div className="flow-title">1 · Mint or pay creates notes</div>
+            <p>
+              A note is <span className="mono">(amount, nonce)</span> owned by a spend key. The circuit writes only its <b>commitment</b>{' '}
+              <span className="mono">H(amount, nonce, owner)</span> into a Merkle tree.
+            </p>
+          </div>
+          <div className="flow-step">
+            <div className="flow-title">2 · Two sealed copies</div>
+            <p>
+              The same note is encrypted to the <b>recipient's delivery key</b> (their wallet finds it by opening every delivery) and to
+              the <b>audit key</b>. The nonce itself is derived from the audit key, so an output the auditor cannot read cannot exist.
+            </p>
+          </div>
+          <div className="flow-step">
+            <div className="flow-title">3 · Spending publishes a nullifier</div>
+            <p>
+              To spend, you prove in zero knowledge that some commitment in the tree is yours and publish{' '}
+              <span className="mono">H(nonce)</span>. Same note, same nullifier, so double spends are refused, but nobody can tell which
+              commitment it was.
+            </p>
+          </div>
+          <div className="flow-step">
+            <div className="flow-title">4 · Enforcement by nullifier</div>
+            <p>
+              The auditor knows every nonce, hence every nullifier. The authority <b>freezes</b> a note by listing its nullifier, or{' '}
+              <b>seizes</b> it: spends it on the owner's behalf into a recovery note. No owner cooperation, no escrowed keys.
+            </p>
+          </div>
+        </div>
+        {view && token && (
+          <p className="hint" style={{ marginTop: 8 }}>
+            Right now: you hold {live.length} live note(s){spent ? ` and ${spent} spent` : ''}; the pool has {token.commitments} commitments and{' '}
+            {token.nullifiers} nullifiers in total. The public cannot tell which of those are yours.
+          </p>
+        )}
+      </section>
+
       {/* ── Account ─────────────────────────────────────────────────────── */}
       <section className="panel">
         <h2>3 · Your notes</h2>

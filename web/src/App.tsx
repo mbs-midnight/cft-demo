@@ -373,13 +373,23 @@ export default function App() {
         {/* ── Guide ───────────────────────────────────────────────────────── */}
         <section className="panel wide guide">
           <h2>Start here</h2>
-          <p className="hint" style={{ marginBottom: 8 }}>
-            A CFT account is <b>not</b> your wallet address. Connecting creates a confidential account in this browser (a secret key and a
-            viewing key); its public <b>accountId</b> is what others need to send to you. The wallet only pays fees and signs. Before an
-            account can register, the issuer must <b>onboard</b> it: that is the KYC step where the holder hands over their viewing key,
-            which is what lets the issuer audit and, if needed, seize later. Amounts are entered in tokens ("12.5") and are hidden
-            on-chain; who sent to whom is public.
-          </p>
+          {noteClient ? (
+            <p className="hint" style={{ marginBottom: 8 }}>
+              <b>Note model.</b> You do not have an account here. Your holdings are <b>notes</b>: sealed envelopes (an amount and a random
+              nonce) that only you can open. The chain stores a <b>commitment</b> (a hash) per note in a Merkle tree; spending a note
+              publishes its <b>nullifier</b> (another hash) so it cannot be spent twice. Neither hash reveals who or how much. Every note is
+              also encrypted twice: once to the recipient (so their wallet finds it) and once to the <b>audit key</b>, so the auditor can
+              open everything while the public sees nothing. A payment consumes one note and creates two: the recipient's and your change.
+            </p>
+          ) : (
+            <p className="hint" style={{ marginBottom: 8 }}>
+              <b>Account model.</b> A CFT account is <b>not</b> your wallet address. Connecting creates a confidential account in this
+              browser (a secret key and a viewing key); its public <b>accountId</b> is what others need to send to you. The wallet only pays
+              fees and signs. Before an account can register, the issuer must <b>onboard</b> it: that is the KYC step where the holder hands
+              over their viewing key, which is what lets the issuer audit and, if needed, seize later. Amounts are entered in tokens
+              ("12.5") and are hidden on-chain; who sent to whom is public.
+            </p>
+          )}
           <ol className="steps">
             {activeSteps.map((s) => (
               <li key={s.label} className={s.done ? 'done' : s === nextStep ? 'next' : ''}>
@@ -391,8 +401,9 @@ export default function App() {
             ))}
           </ol>
           <p className="hint">
-            To move tokens between two wallets: open this page in two browsers (or two profiles), each with its own wallet, join the same
-            contract address in both, register both, and paste the other side's accountId into panel 4.
+            {noteClient
+              ? 'To pay between two wallets: open this page in two browsers, each with its own wallet, join the same contract in both, and paste the other side\'s payment address (panel 3) into panel 4. No registration is needed.'
+              : 'To move tokens between two wallets: open this page in two browsers (or two profiles), each with its own wallet, join the same contract address in both, register both, and paste the other side\'s accountId into panel 4.'}
           </p>
         </section>
 

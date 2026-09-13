@@ -512,3 +512,31 @@ ol.steps .mark {
 .banner.mobile-help li {
   margin: 4px 0;
 }
+
+.panel.explainer {
+  border-color: var(--accent-2);
+}
+
+.flow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.flow-step {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.flow-step p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.flow-title {
+  font-weight: 600;
+  color: var(--accent-2);
+}
