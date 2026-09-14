@@ -223,8 +223,22 @@ ERC-7540 request-then-fulfil flow is the natural interface.
 
 ## The note model
 
-Same constraints, same options. Every note circuit uses witnesses, so the note
-token can be a caller but never a callee. Wrap (consume a note, mint a coin;
+Same constraints, same options, but the paper trail differs. OpenZeppelin's
+note-model sources (branch `feat/hybrid-confidential-token` at `bdf8b5cd`,
+2026-07-24: `ConfidentialNoteFungibleToken.compact`, its extensions and the
+design doc `token/docs/hybrid-confidential-token.md`) say nothing about
+contracts as holders, EOAs or c2c; the design doc's "Out of scope" list
+covers review keys, recovery governance, allowlists, attestation, multi-asset
+and wallet UX, not custody. The conclusion follows from the code rather than
+from a statement: the core header says `transfer` and `burn` "are self-gated
+(spending requires the owner's secret via `wit_SecretKey`)", the spend path
+also needs `wit_InputNote` and `wit_Path`, and created notes "are returned
+to the caller (a local, private result)" to be handed over out of band. A
+contract has no private state to hold a spend secret, a note or a Merkle
+path, and no way to receive a note handed over out of band, so a contract
+cannot own notes for the same cryptographic reason a contract cannot own a
+CFT balance. Every note circuit uses witnesses, so the note token can be a
+caller but never a callee. Wrap (consume a note, mint a coin;
 receive a coin, deliver a note plus audit record) works as in A. The
 freeze-prove pattern is natural per note: a note has a fixed value, so a
 listing is "reveal this note's value to the contract and freeze its
@@ -304,6 +318,12 @@ the move from the recorded listing instead.
   https://github.com/OpenZeppelin/compact-contracts/blob/main/contracts/src/token/ConfidentialFungibleToken.compact#L200-L219
   and FungibleToken header (contract recipients refused until C2C):
   https://github.com/OpenZeppelin/compact-contracts/blob/main/contracts/src/token/FungibleToken.compact
+- OpenZeppelin note model, branch `feat/hybrid-confidential-token` at
+  `bdf8b5cd` (no custody statement; spend is witness-gated per the core
+  header):
+  https://github.com/OpenZeppelin/compact-contracts/blob/feat/hybrid-confidential-token/contracts/src/token/ConfidentialNoteFungibleToken.compact
+  and the design doc
+  https://github.com/OpenZeppelin/compact-contracts/blob/feat/hybrid-confidential-token/contracts/src/token/docs/hybrid-confidential-token.md
 - Stagenet component line and its known issues: `load-test/stagenet/` in this
   workspace (midnight-js 5.0.0-beta, wallet-sdk 2.0.0-beta, ledger-v9, proof
   server 9, compactc 0.34.0)
