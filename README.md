@@ -210,10 +210,12 @@ The honest framing: **permissionless accounts, contract-custodied asset**. The
 issuer controls nothing about who joins and everything about what the asset can
 do.
 
-[`DEFI.md`](DEFI.md) works through what this means for DeFi: the routes that
-exist on this stack (wrap into a native shielded token; DvP and lending built
-into the token contract on top of freeze, prove and seize), what each gains and
-gives up, and what stays out of reach.
+[`DEFI.md`](DEFI.md) works through what this means for DeFi on both stacks:
+today's ledger 8 (wrap into a native shielded token; DvP and lending built into
+the token contract on top of freeze, prove and seize) and ledger 9 on Stagenet,
+where cross-contract calls let the token orchestrate witness-free coin
+contracts, though never the other way round. It covers what each route gains
+and gives up, what is buildable headlessly now, and what stays out of reach.
 
 ## What is OpenZeppelin's and what is this project's
 
