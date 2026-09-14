@@ -1,19 +1,29 @@
 # CFT Demo: OpenZeppelin's Confidential Fungible Token on Midnight
 
-A small, complete application around OpenZeppelin's **ConfidentialFungibleToken
-(CFT)** for Midnight: mint, burn, confidential transfer between accounts,
-viewing keys, freeze, pause, and a viewing-key-gated seize. The web UI connects
-to any Midnight DApp-connector wallet (1AM, Lace) and the CLI runs the same
-flow headlessly against a local network for verification.
+A small, complete application around OpenZeppelin's confidential tokens for
+Midnight, in both of their models: the **ConfidentialFungibleToken (CFT)**
+account model (mint, burn, confidential transfer, onboarding, viewing keys,
+freeze, pause, viewing-key-gated seize) and the draft **note model**
+(fully private graph, mandatory audit channel, freeze and seize by nullifier).
+The web UI connects to any Midnight DApp-connector wallet (1AM, Lace), shows
+side by side what an explorer sees and what a key holder sees, and the CLI runs
+both flows headlessly against a local network for verification.
 
 ```
 cft-demo/
-  contract/   Compact contract (composes OZ CFT + PublicSupply + Ownable) and the
-              shared TypeScript layer: witnesses, wallet-side crypto, ledger readers,
-              simulator tests
-  cli/        headless deploy + end-to-end scenario (seed wallet, local proof server)
+  contract/
+    src/cft-demo.compact        account model: OZ CFT + PublicSupply + Ownable + compliance
+    src/cft-note.compact        note model: OZ ConfidentialNoteFungibleToken regulated preset
+    src/oz/, src/oz-note/       vendored OpenZeppelin modules (unmodified)
+    src/{witnesses,crypto,wallet}.ts   account-model wallet layer
+    src/note/                   note-model wallet layer
+    src/bmt-rehash.ts           indexer Merkle-tree rehash wrapper
+    src/*.test.ts               25 simulator tests
+    src/managed/                compiled output, committed (Vercel cannot run compact)
+  cli/        headless deploy + two end-to-end scenarios (seed wallet, local proof server)
   web/        Vite + React UI for 1AM / Lace via the DApp connector API v4
-  docker/     proof server 8.1.0, and a full standalone node+indexer+prover stack
+  docker/     proof server 8.1.0, and a standalone node+indexer+prover stack (Preview versions)
+  docs/       end-to-end logs from the local network
 ```
 
 ## What the CFT standard is
@@ -78,9 +88,12 @@ Key design points, as the module documents them:
   per transaction is mandatory (seed reuse leaks amount differences), and the
   wallet must keep the plaintext of its balance ciphertext to spend. This
   project's wallet layer does both; the OZ test witness does neither.
-- **Balance recovery is bounded.** A wallet that loses its cache (or a viewer
-  with only the viewing key) recovers a balance by bounded discrete log
-  (2^32 units here). Memos are exact; the accumulated balance is not.
+- **Balances are not directly readable, even by their owner.** The balance
+  ciphertext is exponential ElGamal, so opening it yields `g^v`, not `v`. A
+  wallet must remember its plaintext. This project layers the recovery (see
+  "How the wallet layer works"): cache, own expected values, exact memo sums,
+  issuer supply reconciliation, bounded discrete log (2^32 units), and finally
+  a holder-typed value that is verified before use.
 - **EOA only.** Contracts cannot hold a CFT balance (no private state to
   custody EK).
 - **Concurrency.** Two credits to the same recipient in one block conflict.
@@ -230,24 +243,28 @@ Prerequisites: Node 22, Docker, the `compact` devtools with toolchain 0.31.1
 cd cft-demo
 npm install
 npm run build:contract          # compact compile +0.31.1 → keys/zkir/TS, then tsc
-npm test                        # 11 simulator tests: mint/sweep/transfer/burn/freeze/pause/seize
+npm test                        # 25 simulator tests: 15 account model, 10 note model
 ```
 
 ### Headless end-to-end on a local network
 
 ```bash
-npm run docker:standalone       # node 0.22.5 + indexer + proof server 8.0.3 (genesis wallet is funded)
-npm run e2e:standalone          # deploys, registers 3 accounts, mints, transfers, burns,
-                                # freezes, inspects with a viewing key, seizes, pauses
+npm run docker:standalone       # node 1.0.2 + indexer 4.3.5 + proof server 8.1.0 (genesis wallet is funded)
+npm run e2e:standalone          # account model: deploy, onboard, register, mint, sweep, transfer,
+                                # burn, freeze, viewing-key inspect, seize, pause
+npm run e2e-note:standalone     # note model: deploy, mint, private transfer, burn, audit trail,
+                                # freeze by nullifier, seize
 npm run docker:down
 ```
 
-The same script runs on Preview or Preprod with a funded seed:
+Both scripts run on Preview or Preprod with a funded seed:
 `SEED=<hex> npm run e2e:preview` (needs the proof server: `npm run docker:proof`).
 
-Proof server versions matter: the dev node image (0.22.5) rejects proofs from
-proof server 8.1.0 with ledger `Custom error: 170` (InvalidDustSpendProof), so
-the standalone stack pins 8.0.3; the public networks (node 1.0.2) take 8.1.0.
+The local stack is pinned to the same component versions as Preview. The
+older `midnight-node:0.22.5` image used by other example repos rejects every
+transaction built with ledger-v8 8.1.0 with `Custom error: 170`
+(InvalidDustSpendProof); client ledger and node must match. The images are the
+`-arm64` builds; on x86 use the plain tags. Logs of passing runs are in `docs/`.
 
 ### Web UI with 1AM or Lace
 
@@ -274,9 +291,38 @@ npm run web                     # http://localhost:5174
    ids involved, fee, total supply, opaque ciphertexts) next to what the
    viewing-key holder reads (amounts, balances, credit history). The Account
    tab does the same for any accountId.
-6. Issuer: **Freeze**, then in panel 6 load the holder's stored viewing key,
-   **Inspect**, **Seize** to a treasury account (must differ from the seized
-   account). **Unfreeze**, **Pause**, **Unpause**.
+6. Issuer: **Freeze** (one account) or **Pause** (the whole token) in panel 5.
+   Seize lives in panel 6: load the holder's stored viewing key ("load key in
+   panel 6" on their row), **Inspect**, then **Seize** into a treasury account
+   that differs from the seized one. The Seize box lists the three conditions
+   (frozen, balance known, distinct treasury) and which are met.
+7. Note model: choose "Note model" when deploying (panel 2; joining detects
+   the model). Panel 3 shows your notes and your **payment address** (spend
+   key + delivery key) instead of an accountId; there is no registration.
+   Panel 4 pays privately (one note per payment, change comes back), panel 5
+   mints and, for the authority, freezes or seizes any live note from the
+   audit trail. A "How the note model works" panel explains commitments,
+   nullifiers, deliveries and audit records.
+
+Things the UI does for you, and their edge cases:
+
+- **Spendable balance.** Shown with its source: cache, verified expected value
+  after your own move, sum of memos (never-spent account), supply
+  reconciliation (issuer only: total supply minus every onboarded holder's
+  balance, using the stored viewing keys), or bounded recovery. If none of
+  those resolves, a field asks for the figure; a wrong value is refused, since
+  it is checked against the ciphertext.
+- **Private state per wallet and contract.** Your identity (SK, viewing key)
+  is in localStorage per wallet address; the cache, expected values and the
+  issuer's stored viewing keys are in the wallet's private-state store per
+  wallet address and contract. Rejoining keeps all of it (see the midnight-js
+  note below). If a holder's key is ever missing, paste their viewing key into
+  panel 5 and use **Store key only**: no transaction, the account stays
+  onboarded.
+- **Errors.** Ledger `Custom error: 170` means the node rejected the DUST fee
+  proof the wallet attached (stale wallet DUST state, or a wallet/prover on a
+  different ledger version than the network); the banner explains it. "Would
+  exhaust the block limits" means a deploy has too many circuits.
 
 Amounts are typed in tokens (`12.5`), converted with the token's decimals.
 A CFT account is not the wallet address: connecting derives a per-wallet
@@ -324,17 +370,35 @@ machine; use it only for local development.
 ## How the wallet layer works
 
 - **Private state** (`contract/src/witnesses.ts`) holds `SK`, `EK`, the
-  plaintext cache, the per-transaction randomness seed, and, for the issuer,
-  imported viewing keys plus recovered balances for `seize`. It is plain JSON
-  and lives in midnight-js's level private-state store per wallet address.
+  plaintext cache, expected spendable values after own moves, the
+  per-transaction randomness seed, and, for the issuer, the holders' viewing
+  keys plus recovered balances for `seize`. It is plain JSON and lives in
+  midnight-js's level private-state store per wallet address and contract.
+- **midnight-js pitfall.** `findDeployedContract` overwrites the stored private
+  state whenever `initialPrivateState` is passed together with
+  `privateStateId`. Every join here first reads the store and passes an initial
+  state only when nothing is stored yet; otherwise a rejoin wipes the cache and
+  the stored viewing keys.
 - Before **every** transaction the app rotates the randomness seed; before
   every **debit** it syncs the spendable ciphertext's plaintext (cache, else
   recovery with its own viewing key) so `wit_PlaintextBalance` can answer.
 - **Balances** (`contract/src/wallet.ts`): `pending` is derived exactly from
   the memos (it is always the sum of the newest k memos, checked against the
-  ciphertext), for any amount. `spendable` comes from the wallet cache, else
-  from the value the wallet expected after its own last move (verified against
-  the ciphertext), else bounded recovery.
+  ciphertext), for any amount. `spendable` is resolved in order: wallet cache;
+  values the wallet expected after its own last moves; the sum of all memos
+  (exact for an account that swept and never spent); for the issuer, total
+  supply minus every onboarded holder's balance opened with their stored keys;
+  bounded recovery; finally a holder-typed value. Each candidate is accepted
+  only if `verifyBalance` shows it is the ciphertext's plaintext.
+- **Note wallet** (`contract/src/note/`): identities are a spend key
+  (`pk = Hf(sk)`) and a delivery scalar (`encPk = g^encSk`); a payment address
+  is both. Notes are found by opening every delivery with the delivery secret
+  and keeping those whose commitment under our `pk` is in the tree; spent
+  status is the nullifier's presence. Spends select one input note (smallest
+  that covers the amount) and set it as the `wit_InputNote` witness; the
+  Merkle path witness is read from the live ledger, which needs the rehash
+  wrapper after indexer decode. The auditor opens every audit record with the
+  audit secret; the authority freezes or seizes by the nullifier derived there.
 - **Recovery** (`contract/src/crypto.ts`): a ciphertext is decrypted to `g^v`
   through the pure `decryptToPoint` and `v` is recovered by baby-step
   giant-step on `@noble/curves`' Jubjub (verified to match the runtime's curve
@@ -355,7 +419,10 @@ license in `contract/src/oz/LICENSE`).
 
 - OpenZeppelin Contracts for Compact: https://github.com/OpenZeppelin/compact-contracts
   (`contracts/src/token/ConfidentialFungibleToken.compact`, `crypto/ElGamal.compact`,
-  `crypto/EcdhMask.compact`, `token/extensions/ConfidentialFungibleTokenPublicSupply.compact`)
+  `crypto/EcdhMask.compact`, `token/extensions/ConfidentialFungibleTokenPublicSupply.compact`;
+  note model on branch `feat/hybrid-confidential-token`, design doc
+  `contracts/src/token/docs/hybrid-confidential-token.md`)
+- 1AM mobile wallet (in-app dApp browser): https://apps.apple.com/app/1am-wallet/id6761093596
 - Midnight compatibility matrix: https://docs.midnight.network/relnotes/support-matrix
 - Midnight DApp connector API: https://docs.midnight.network/api-reference/dapp-connector
 - 1AM wallet developer page: https://1am.xyz/developers
