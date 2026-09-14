@@ -87,7 +87,8 @@ export default function App() {
   const [mintTo, setMintTo] = useState('');
   const [mintAmount, setMintAmount] = useState('');
   const [freezeTarget, setFreezeTarget] = useState('');
-  const [onboardKey, setOnboardKey] = useState('');
+  const [importKey, setImportKey] = useState('');
+  const [escrowTarget, setEscrowTarget] = useState('');
   const [storedKeys, setStoredKeys] = useState<ViewingKeyExport[]>([]);
   const [viewerKey, setViewerKey] = useState('');
   const [viewerClaim, setViewerClaim] = useState('');
@@ -277,7 +278,7 @@ export default function App() {
     const keys: Record<string, string> = {};
     const names: Record<string, string> = {};
     if (client) {
-      keys[client.accountId] = client.identity.encryptionKeyHex;
+      keys[client.accountId] = client.viewingKey().viewingKey;
       names[client.accountId] = 'you';
     }
     for (const k of storedKeys) keys[k.accountId] = k.viewingKey;
@@ -311,16 +312,29 @@ export default function App() {
       setInspectionVk(vk);
     });
 
+  /** Issuer: open an account's on-chain escrow with the compliance key, then inspect it. */
+  const onOpenEscrow = (accountId: string) =>
+    run('Open escrowed viewing key', async () => {
+      if (!client) throw new Error('join a token first');
+      const vk = await client.escrowedViewingKey(accountId);
+      setViewerKey(JSON.stringify(vk));
+      setViewerClaim('');
+      setStoredKeys(await client.storedViewingKeys());
+      const r = await client.inspect(vk);
+      setInspection(r);
+      setInspectionVk(vk);
+      say(`opened ${short(vk.accountId, 8)}'s viewing key from the on-chain escrow; no cooperation from the holder was needed`, 'ok');
+    });
+
   // ── step status for the guide ─────────────────────────────────────────────
   const steps: { label: string; done: boolean; hint: string }[] = [
     { label: 'Connect a wallet', done: !!wallet, hint: 'Panel 1. 1AM or Lace must be installed and unlocked on the chosen network.' },
     { label: 'Join or deploy a token', done: !!client, hint: 'Panel 2. Deploying makes you the issuer; joining needs an address from the issuer.' },
     {
-      label: 'Get onboarded',
-      done: !!balances?.onboarded,
-      hint: 'Holder: "Copy viewing key" in panel 3 and send it to the issuer. Issuer: paste it in panel 5 "Onboard holder". The issuer is onboarded automatically.',
+      label: 'Register your account',
+      done: !!balances?.registered,
+      hint: 'Panel 3. Permissionless: publishes your encryption key so you can receive, and escrows your viewing key to the compliance key in the same proof.',
     },
-    { label: 'Register your account', done: !!balances?.registered, hint: 'Panel 3, once onboarded. Publishes your encryption key so you can receive.' },
     {
       label: 'Receive tokens',
       done: !!balances && ((balances.pending ?? 0n) > 0n || (balances.spendable ?? 0n) > 0n),
@@ -328,7 +342,7 @@ export default function App() {
     },
     { label: 'Sweep pending → spendable', done: !!balances && (balances.spendable ?? 0n) > 0n, hint: 'Panel 3. Incoming credits wait in "pending" until you sweep them.' },
     { label: 'Transfer or burn', done: false, hint: 'Panel 4. Paste the recipient accountId; the amount stays hidden on-chain.' },
-    { label: 'Audit with a viewing key', done: !!inspection, hint: 'Panel 6: pick an onboarded holder (key stored at onboarding) or paste a key, then Inspect.' },
+    { label: 'Audit with a viewing key', done: !!inspection, hint: 'Panel 6: issuer picks any registered account (its escrowed key opens automatically) or anyone pastes a disclosed key, then Inspect.' },
     {
       label: 'Issuer: freeze one account, or pause the whole token',
       done: false,
@@ -400,8 +414,9 @@ export default function App() {
             <p className="hint" style={{ marginBottom: 8 }}>
               <b>Account model.</b> A CFT account is <b>not</b> your wallet address. Connecting creates a confidential account in this
               browser (a secret key and a viewing key); its public <b>accountId</b> is what others need to send to you. The wallet only pays
-              fees and signs. Before an account can register, the issuer must <b>onboard</b> it: that is the KYC step where the holder hands
-              over their viewing key, which is what lets the issuer audit and, if needed, seize later. Amounts are entered in tokens
+              fees and signs. Anyone can <b>register</b>, no allowlist: the registration proof also <b>escrows</b> your viewing key on-chain,
+              encrypted to a <b>compliance key</b> fixed at deployment (here the issuer's). Receiving requires registration, so every
+              holder, including wallets the issuer has never heard of, can be audited, frozen and seized. Amounts are entered in tokens
               ("12.5") and are hidden on-chain; who sent to whom is public.
             </p>
           )}
@@ -620,18 +635,18 @@ export default function App() {
                     <span className="pill">syncing…</span>
                   ) : balances.registered ? (
                     <span className="pill good">registered</span>
-                  ) : balances.onboarded ? (
-                    <span className="pill warn">onboarded, not registered</span>
                   ) : (
-                    <span className="pill warn">not onboarded</span>
+                    <span className="pill warn">not registered</span>
                   )}{' '}
+                  {balances?.escrowed && <span className="pill">viewing key escrowed</span>}{' '}
+                  {balances?.complianceHolder && <span className="pill good">compliance key: you</span>}{' '}
                   {balances?.frozen && <span className="pill bad">FROZEN</span>}
                 </dd>
               </dl>
               <div className="row">
                 <button
                   onClick={() => tx('Register', (c) => c.register())}
-                  disabled={!client || !balances || balances.registered || !balances.onboarded || !!busy}
+                  disabled={!client || !balances || balances.registered || !!busy}
                 >
                   Register
                 </button>
@@ -643,17 +658,17 @@ export default function App() {
                   onClick={() => {
                     if (!client) return;
                     void navigator.clipboard.writeText(JSON.stringify(client.viewingKey()));
-                    say('viewing key copied (accountId + EK). Send it to the issuer to get onboarded; it lets them read your account, not spend from it.');
+                    say('viewing key copied (accountId + viewing scalar). Whoever holds it can read your account, not spend from it. The compliance key already holds it through the on-chain escrow.');
                   }}
                   disabled={!client}
                 >
                   Copy viewing key
                 </button>
               </div>
-              {balances && !balances.onboarded && !balances.registered && (
+              {balances && !balances.registered && (
                 <p className="hint">
-                  Not onboarded yet: click "Copy viewing key" and send it to the issuer. Once they onboard your accountId, Register becomes
-                  available.
+                  Not registered yet. Register publishes your encryption key (so others can send to you) and escrows your viewing key to the
+                  compliance key in the same proof. No permission from the issuer is needed.
                 </p>
               )}
               {balances?.registered && (
@@ -763,59 +778,26 @@ export default function App() {
             {isIssuer ? <span className="pill good">you are the issuer</span> : <span className="pill">issuer only · read-only for you</span>}
           </h2>
           <p className="hint" style={{ marginTop: -6, marginBottom: 10 }}>
-            Actions here need the issuer's secret key; they are proven on-chain by the Ownable check. Three scopes: <b>onboard</b>
-            (who may join), <b>freeze</b> (one account), <b>pause</b> (the whole token).
+            Actions here need the issuer's secret key; they are proven on-chain by the Ownable check. Three scopes: <b>freeze</b>
+            (one account), <b>pause</b> (the whole token), <b>seize</b> (panel 6, any frozen account). There is no onboarding: every
+            holder's viewing key is already on-chain, escrowed to the compliance key.
           </p>
           <div className="subsection">
-            <h3>Onboarding <span className="scope">per account</span></h3>
-            <p className="hint">Admits an account so it can register. Store its viewing key here; that is what makes audit and seize possible later.</p>
+            <h3>Holders <span className="scope">escrowed viewing keys</span></h3>
+            <p className="hint">
+              Registration is permissionless, and each registration escrows the account's viewing key to the compliance key
+              {balances?.complianceHolder ? ' (held by this browser)' : ''}. Any registered account, including one the issuer never met, can
+              be opened, frozen and seized from here. Nothing is asked of the holder.
+            </p>
           </div>
-          <label>Onboard a holder: paste the viewing key export they sent you</label>
-          <div className="row" style={{ alignItems: 'flex-start' }}>
-            <textarea
-              className="grow"
-              style={{ minHeight: 44 }}
-              value={onboardKey}
-              onChange={(e) => setOnboardKey(e.target.value)}
-              placeholder='{"accountId":"…","viewingKey":"…"}'
-            />
-            <button
-              className="good"
-              onClick={() =>
-                tx('Onboard holder', async (c) => {
-                  const r = await c.onboard(parseViewingKey(onboardKey));
-                  setOnboardKey('');
-                  return r;
-                })
-              }
-              disabled={!isIssuer || !onboardKey || !!busy}
-            >
-              Onboard
-            </button>
-            <button
-              className="secondary"
-              onClick={() =>
-                run('Store viewing key', async () => {
-                  if (!client) throw new Error('join a token first');
-                  await client.storeViewingKey(parseViewingKey(onboardKey));
-                  setOnboardKey('');
-                  await refresh();
-                })
-              }
-              disabled={!isIssuer || !onboardKey || !!busy}
-              title="Store the key in this browser without a transaction (for an account that is already onboarded)"
-            >
-              Store key only
-            </button>
-          </div>
-          <p className="hint">Stores the viewing key in your issuer state and allowlists the accountId on-chain, so the holder can register.</p>
-          {isIssuer && token && token.allowlist.length > 0 && (
+          {token && token.accounts.length > 0 && (
             <>
               <label>
-                Onboarded accounts ({storedKeys.filter((k) => k.accountId !== client?.accountId).length} viewing key(s) stored in this browser)
+                Registered accounts ({token.accounts.length}; {token.escrowed} escrowed;{' '}
+                {storedKeys.filter((k) => k.accountId !== client?.accountId).length} key(s) opened in this browser)
               </label>
               <ul className="plain mono">
-                {token.allowlist.map((a) => {
+                {token.accounts.map((a) => {
                   const stored = storedKeys.find((k) => k.accountId === a);
                   const isMe = a === client?.accountId;
                   return (
@@ -823,25 +805,19 @@ export default function App() {
                       <span>{short(a, 12)}</span>
                       {isMe && <span className="pill good">you</span>}
                       {token.frozen.includes(a) && <span className="pill bad">FROZEN</span>}
-                      {stored ? <span className="pill good">key stored</span> : !isMe && <span className="pill warn">no key</span>}
-                      {!isMe && (
+                      {stored && <span className="pill good">key opened</span>}
+                      {!isMe && isIssuer && (
                         <>
                           <button className="secondary small" onClick={() => setFreezeTarget(a)}>
                             select
                           </button>
-                          {stored && (
-                            <button
-                              className="secondary small"
-                              onClick={() => {
-                                setViewerKey(JSON.stringify(stored));
-                                setViewerClaim('');
-                              }}
-                            >
-                              load key in panel 6
-                            </button>
-                          )}
-                          <button className="secondary small" onClick={() => tx('Offboard', (c) => c.offboard(a))} disabled={!!busy}>
-                            offboard
+                          <button
+                            className="secondary small"
+                            onClick={() => onOpenEscrow(a)}
+                            disabled={!!busy || !balances?.complianceHolder}
+                            title={balances?.complianceHolder ? 'decrypt the escrow with the compliance key and inspect in panel 6' : 'this browser does not hold the compliance key'}
+                          >
+                            open key → panel 6
                           </button>
                         </>
                       )}
@@ -849,6 +825,34 @@ export default function App() {
                   );
                 })}
               </ul>
+            </>
+          )}
+          {isIssuer && !balances?.complianceHolder && (
+            <>
+              <label>Import a disclosed viewing key (only needed because this browser does not hold the compliance key)</label>
+              <div className="row" style={{ alignItems: 'flex-start' }}>
+                <textarea
+                  className="grow"
+                  style={{ minHeight: 44 }}
+                  value={importKey}
+                  onChange={(e) => setImportKey(e.target.value)}
+                  placeholder='{"accountId":"…","viewingKey":"…"}'
+                />
+                <button
+                  className="secondary"
+                  onClick={() =>
+                    run('Store viewing key', async () => {
+                      if (!client) throw new Error('join a token first');
+                      await client.storeViewingKey(parseViewingKey(importKey));
+                      setImportKey('');
+                      await refresh();
+                    })
+                  }
+                  disabled={!importKey || !!busy}
+                >
+                  Store key
+                </button>
+              </div>
             </>
           )}
           <div className="subsection">
@@ -933,7 +937,18 @@ export default function App() {
           <h2>6 · Viewing key: audit and seize</h2>
           <div className="row" style={{ alignItems: 'flex-start' }}>
             <div style={{ flex: '1 1 380px' }}>
-              <label>Paste a viewing key export ({'{"accountId":…,"viewingKey":…}'})</label>
+              {isIssuer && (
+                <>
+                  <label>Issuer: open any registered account's escrowed viewing key with the compliance key</label>
+                  <div className="row">
+                    <input className="grow" value={escrowTarget} onChange={(e) => setEscrowTarget(e.target.value)} placeholder="accountId (or pick one in panel 5)" />
+                    <button onClick={() => onOpenEscrow(escrowTarget)} disabled={!client || !escrowTarget || !!busy || !balances?.complianceHolder}>
+                      Open escrow &amp; inspect
+                    </button>
+                  </div>
+                </>
+              )}
+              <label>{isIssuer ? '…or paste' : 'Paste'} a viewing key export ({'{"accountId":…,"viewingKey":…}'})</label>
               <textarea value={viewerKey} onChange={(e) => setViewerKey(e.target.value)} placeholder='{"accountId":"…","viewingKey":"…"}' />
               <div className="row">
                 <button onClick={onInspect} disabled={!client || !viewerKey || !!busy}>
@@ -979,12 +994,13 @@ export default function App() {
               {isIssuer && (
                 <div style={{ marginTop: 12 }} className="subsection killswitch">
                   <h3>
-                    Seize <span className="scope global">issuer · needs viewing key</span>
+                    Seize <span className="scope global">issuer · key from the escrow</span>
                   </h3>
                   {!inspection || !inspectionVk ? (
                     <p className="hint">
-                      Inspect the holder first: pick an onboarded account in panel 5 ("load key in panel 6") or paste their viewing key
-                      above, then click <b>Inspect account</b>. Seize moves the whole balance to a treasury account.
+                      Inspect the holder first: pick any registered account in panel 5 ("open key → panel 6"), enter its accountId above, or
+                      paste a disclosed viewing key, then <b>Inspect</b>. Seize moves the whole balance to a treasury account. The holder is
+                      not involved.
                     </p>
                   ) : (
                     <>
@@ -1021,8 +1037,8 @@ export default function App() {
                         </li>
                       </ul>
                       <p className="hint">
-                        The circuit proves the viewing key opens the frozen balance to exactly this amount, zeroes the account and credits
-                        the treasury. Total supply is unchanged; the amount is not revealed on-chain.
+                        The circuit proves the viewing key is this account's and opens the frozen balance to exactly this amount, zeroes the
+                        account and credits the treasury. Total supply is unchanged; the amount is not revealed on-chain.
                       </p>
                     </>
                   )}

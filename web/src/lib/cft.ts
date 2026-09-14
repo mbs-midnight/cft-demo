@@ -20,10 +20,15 @@ import {
   CftPrivateState,
   accountIdFromSecretKey,
   addCiphertexts,
+  derivePk,
   fromHex,
+  hexToScalar,
+  holdsComplianceKey,
   memoHistory,
+  openEscrowedKey,
   readAccount,
   readToken,
+  registeredAccounts,
   resolvePending,
   resolveSpendable,
   toHex,
@@ -128,11 +133,14 @@ export const deploy = (
   symbol: string,
   decimals: bigint,
 ): Promise<DeployedCft> =>
+  // The issuer's own EK doubles as the compliance key that every holder's
+  // viewing key is escrowed to. A production deployment would pass a separate
+  // key (a regulator's, or a threshold key) here.
   deployContract(providers, {
     compiledContract,
     privateStateId: PRIVATE_STATE_ID,
     initialPrivateState: issuerState,
-    args: [name, symbol, decimals, accountIdFromSecretKey(fromHex(issuerState.secretKeyHex))],
+    args: [name, symbol, decimals, accountIdFromSecretKey(fromHex(issuerState.secretKeyHex)), derivePk(fromHex(issuerState.encryptionKeyHex))],
   });
 
 /**
@@ -156,8 +164,11 @@ export interface TxReceipt {
 const receipt = (tx: FinalizedTxData): TxReceipt => ({ txId: tx.txId, blockHeight: Number(tx.blockHeight) });
 
 export interface Balances {
-  onboarded: boolean;
   registered: boolean;
+  /** This account's viewing key is on chain, encrypted to the compliance key. */
+  escrowed: boolean;
+  /** This browser's EK is the compliance key: it can open every escrow. */
+  complianceHolder: boolean;
   frozen: boolean;
   spendable: bigint | undefined;
   pending: bigint | undefined;
@@ -235,26 +246,31 @@ export class CftClient {
    * an unknown balance: `spendable` is `undefined` with source `'unknown'`.
    */
   async balances(): Promise<Balances> {
-    const view = await this.view();
+    const ledger = await this.ledger();
+    const view = readAccount(ledger, this.accountId);
     let s = await this.state();
-    const ek = s.encryptionKeyHex;
-    const memos = view.registered ? memoHistory(view, ek) : [];
-    const pe = resolvePending(view, ek);
-    let sp = resolveSpendable(view, ek, s);
-    if (sp.value === undefined && view.spendableCt && pe.value !== undefined && Object.keys(s.viewingKeys).length > 0) {
-      // Issuer reconciliation: totalSupply is public and the issuer holds the
-      // viewing keys of every onboarded holder, so its own spendable is the
-      // supply minus everyone else's balance minus its own pending. Verified
-      // against the ciphertext like any other candidate.
-      const ledger = await this.ledger();
+    const vk = CftPrivateState.viewingKeyHex(s);
+    const complianceHolder = holdsComplianceKey(ledger, s.encryptionKeyHex);
+    const memos = view.registered ? memoHistory(view, vk) : [];
+    const pe = resolvePending(view, vk);
+    let sp = resolveSpendable(view, vk, s);
+    if (sp.value === undefined && view.spendableCt && pe.value !== undefined) {
+      // Compliance-key reconciliation: totalSupply is public and the escrow
+      // gives the compliance holder every other account's viewing key, so its
+      // own spendable is the supply minus everyone else's balance minus its own
+      // pending. Verified against the ciphertext like any other candidate.
       let others = 0n;
       let complete = true;
-      for (const [acct, vk] of Object.entries(s.viewingKeys)) {
+      for (const acct of registeredAccounts(ledger)) {
         if (acct === this.accountId) continue;
+        const key = s.viewingKeys[acct] ?? (complianceHolder ? openEscrowedKey(ledger, acct, s.encryptionKeyHex) : undefined);
+        if (!key) {
+          complete = false;
+          break;
+        }
         const v = readAccount(ledger, acct);
-        if (!v.registered) continue;
-        const osp = resolveSpendable(v, vk);
-        const ope = resolvePending(v, vk);
+        const osp = resolveSpendable(v, key);
+        const ope = resolvePending(v, key);
         if (osp.value === undefined || ope.value === undefined) {
           complete = false;
           break;
@@ -263,15 +279,16 @@ export class CftClient {
       }
       if (complete) {
         const candidate = ledger.Supply__totalSupply - others - pe.value;
-        if (candidate >= 0n && verifyBalance(view.spendableCt, fromHex(ek), candidate)) sp = { value: candidate, source: 'candidate' };
+        if (candidate >= 0n && verifyBalance(view.spendableCt, hexToScalar(vk), candidate)) sp = { value: candidate, source: 'candidate' };
       }
     }
     if (view.spendableCt && sp.value !== undefined) s = CftPrivateState.cachePlaintext(s, view.spendableCt, sp.value);
     if (view.pendingCt && pe.value !== undefined) s = CftPrivateState.cachePlaintext(s, view.pendingCt, pe.value);
     await this.setState(s);
     return {
-      onboarded: view.onboarded,
       registered: view.registered,
+      escrowed: view.escrowed,
+      complianceHolder,
       frozen: view.frozen,
       spendable: sp.value,
       pending: pe.value,
@@ -286,14 +303,15 @@ export class CftClient {
     const view = await this.view();
     if (!view.spendableCt) throw new Error('account not registered');
     const s = await this.state();
-    if (!verifyBalance(view.spendableCt, fromHex(s.encryptionKeyHex), value)) {
+    if (!verifyBalance(view.spendableCt, hexToScalar(CftPrivateState.viewingKeyHex(s)), value)) {
       throw new Error('that is not the plaintext of your current spendable balance');
     }
     await this.setState(CftPrivateState.cachePlaintext(s, view.spendableCt, value));
   }
 
+  /** This account's shareable viewing key (the scalar): reads memos and balances, cannot spend. */
   viewingKey(): ViewingKeyExport {
-    return { accountId: this.accountId, viewingKey: this.identity.encryptionKeyHex };
+    return { accountId: this.accountId, viewingKey: CftPrivateState.viewingKeyHex(this.identity) };
   }
 
   private async rotateSeed(): Promise<void> {
@@ -311,37 +329,38 @@ export class CftClient {
     return b;
   }
 
+  /**
+   * Permissionless. The circuit registers this account's encryption key and,
+   * in the same proof, escrows the matching viewing key to the compliance key.
+   */
   async register(): Promise<TxReceipt> {
     const view = await this.view();
     if (view.registered) throw new Error('already registered');
-    if (!view.onboarded) throw new Error('not onboarded: send your viewing key to the issuer and ask them to onboard your accountId');
     await this.rotateSeed();
     return receipt((await this.contract.callTx.register()).public);
   }
 
   /**
-   * Issuer: onboard a holder. The holder's viewing key export is the KYC
-   * artifact: it is stored in the issuer's private state (so `seize` can use it
-   * later) and the accountId is added to the on-chain allowlist.
+   * Compliance-key holder: open any registered account's on-chain escrow and
+   * remember its viewing key. No transaction, no cooperation from the holder.
    */
-  async onboard(vk: ViewingKeyExport): Promise<TxReceipt> {
+  async escrowedViewingKey(accountId: string): Promise<ViewingKeyExport> {
     const s = await this.state();
-    await this.setState(CftPrivateState.withViewingKey(s, vk.accountId, vk.viewingKey));
-    await this.rotateSeed();
-    return receipt((await this.contract.callTx.setOnboarded(fromHex(vk.accountId), true)).public);
+    const l = await this.ledger();
+    if (!holdsComplianceKey(l, s.encryptionKeyHex)) throw new Error('this browser does not hold the compliance key the escrows are encrypted to');
+    const id = accountId.trim().toLowerCase();
+    const opened = openEscrowedKey(l, id, s.encryptionKeyHex);
+    if (!opened) throw new Error('that accountId is not registered here (no escrow entry)');
+    await this.setState(CftPrivateState.withViewingKey(s, id, opened));
+    return { accountId: id, viewingKey: opened };
   }
 
-  async offboard(account: string): Promise<TxReceipt> {
-    await this.rotateSeed();
-    return receipt((await this.contract.callTx.setOnboarded(fromHex(account), false)).public);
-  }
-
-  /** Store a holder's viewing key locally (no transaction), e.g. to restore one after a reset. */
+  /** Store a viewing key a holder disclosed (only needed when the compliance key is held elsewhere). */
   async storeViewingKey(vk: ViewingKeyExport): Promise<void> {
     await this.setState(CftPrivateState.withViewingKey(await this.state(), vk.accountId, vk.viewingKey));
   }
 
-  /** Viewing keys collected at onboarding, by accountId. */
+  /** Viewing keys this browser holds for other accounts (opened from escrows or imported). */
   async storedViewingKeys(): Promise<ViewingKeyExport[]> {
     const s = await this.state();
     return Object.entries(s.viewingKeys).map(([accountId, viewingKey]) => ({ accountId, viewingKey }));
@@ -391,7 +410,7 @@ export class CftClient {
     const pe = resolvePending(view, vk.viewingKey);
     let sp = resolveSpendable(view, vk.viewingKey);
     if (sp.value === undefined && claimedSpendable !== undefined && view.spendableCt) {
-      if (verifyBalance(view.spendableCt, fromHex(vk.viewingKey), claimedSpendable)) {
+      if (verifyBalance(view.spendableCt, hexToScalar(vk.viewingKey), claimedSpendable)) {
         sp = { value: claimedSpendable, source: 'candidate' };
       }
     }
@@ -406,7 +425,7 @@ export class CftClient {
     if (vk.accountId === to.toLowerCase()) {
       throw new Error('the treasury must be a different registered account than the one being seized (use another wallet\'s accountId)');
     }
-    if (total === undefined) throw new Error('could not open the balance with this viewing key (or it is above the recovery bound: enter the holder-disclosed balance)');
+    if (total === undefined) throw new Error('could not open the balance with this viewing key (or it is above the recovery bound: enter the holder-claimed balance)');
     const totalCt = addCiphertexts(view.spendableCt, view.pendingCt);
     let s = await this.state();
     s = CftPrivateState.withViewingKey(s, vk.accountId, vk.viewingKey);

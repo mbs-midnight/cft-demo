@@ -1,6 +1,7 @@
 // End-to-end scenario against a real network (standalone Docker by default):
-// deploy, register three CFT accounts, mint, sweep, transfer, burn, freeze,
-// viewing-key inspection, seize, unfreeze, pause / unpause.
+// deploy, permissionless registration (viewing keys escrowed on-chain), mint,
+// sweep, transfer, burn, a wallet in the wild that the issuer never met, freeze,
+// escrow-opened viewing-key inspection, seize, unfreeze, pause / unpause.
 //
 // One funding wallet pays DUST for everyone; each actor has its own CFT
 // identity (SK / EK) and private-state store, which is the interesting part:
@@ -52,14 +53,17 @@ const main = async () => {
   const dust = await ensureDust(wallet);
   log(`DUST: ${formatAmount(dust, 15)}`);
 
-  // Three independent CFT identities sharing one fee-paying wallet.
+  // Four independent CFT identities sharing one fee-paying wallet. Carol is
+  // "in the wild": she never talks to the issuer, she just receives tokens.
   const issuerState = CftPrivateState.generate();
   const aliceState = CftPrivateState.generate();
   const bobState = CftPrivateState.generate();
+  const carolState = CftPrivateState.generate();
   const idOf = (s: CftPrivateState) => toHex(accountIdFromSecretKey(fromHex(s.secretKeyHex)));
   log(`issuer accountId: ${idOf(issuerState)}`);
   log(`alice  accountId: ${idOf(aliceState)}`);
   log(`bob    accountId: ${idOf(bobState)}`);
+  log(`carol  accountId: ${idOf(carolState)} (wild wallet)`);
 
   heading('Deploy');
   const issuerProviders = await makeProviders(config, wallet, `issuer-${Date.now()}`);
@@ -72,11 +76,14 @@ const main = async () => {
 
   const aliceProviders = await makeProviders(config, wallet, `alice-${Date.now()}`);
   const bobProviders = await makeProviders(config, wallet, `bob-${Date.now()}`);
+  const carolProviders = await makeProviders(config, wallet, `carol-${Date.now()}`);
   const alice = new CftClient(aliceProviders, await join(aliceProviders, address, aliceState));
   const bob = new CftClient(bobProviders, await join(bobProviders, address, bobState));
+  const carol = new CftClient(carolProviders, await join(carolProviders, address, carolState));
   const issuerId = idOf(issuerState);
   const aliceId = idOf(aliceState);
   const bobId = idOf(bobState);
+  const carolId = idOf(carolState);
 
   const show = async (label: string, who: CftClient) => {
     const b = await who.balances();
@@ -88,15 +95,15 @@ const main = async () => {
   };
   const supply = async () => log(`totalSupply (public): ${formatAmount((await issuer.token()).totalSupply, DECIMALS)} cUSD`);
 
-  heading('Onboard (KYC: holders hand the issuer their viewing keys) + register');
-  await expectFailure('alice registering before onboarding', () => alice.register(), /not onboarded/);
-  await withStatus('issuer onboard alice (stores her viewing key, allowlists her id)', async () => issuer.onboard(await alice.exportViewingKey()));
-  await withStatus('issuer onboard bob', async () => issuer.onboard(await bob.exportViewingKey()));
+  heading('Register (permissionless; each registration escrows the viewing key to the compliance key)');
   for (const [name, who] of [['issuer', issuer], ['alice', alice], ['bob', bob]] as const) {
     const r = await withStatus(`register ${name}`, () => who.register());
     log(`tx ${r.txId} @ block ${r.blockHeight}`);
   }
-  log(`allowlist: ${(await issuer.token()).allowlist.length} accounts`);
+  {
+    const t = await issuer.token();
+    log(`registered ${t.registered}, escrowed ${t.escrowed}; compliance key ${t.complianceKey.slice(0, 12)}… (held by the issuer's EK here)`);
+  }
 
   heading('Mint (issuer → alice)');
   await withStatus('mint 1000.00 cUSD to alice', () => issuer.mint(aliceId, parseAmount('1000.00', DECIMALS)));
@@ -119,38 +126,48 @@ const main = async () => {
   await show('bob', bob);
   await supply();
 
-  heading('Freeze bob');
-  await withStatus('issuer freeze bob', () => issuer.freeze(bobId));
-  await show('bob', bob);
-  await expectFailure('frozen bob sending', () => bob.transfer(aliceId, 1n), /account frozen/);
-  await expectFailure('sending to frozen bob', () => alice.transfer(bobId, 1n), /account frozen/);
-  await expectFailure('frozen bob burning', () => bob.burn(1n), /account frozen/);
+  heading('A wallet in the wild: carol registers herself and gets paid by bob');
+  await withStatus('carol register (no contact with the issuer)', () => carol.register());
+  await withStatus('bob transfer 100.00 cUSD to carol', () => bob.transfer(carolId, parseAmount('100.00', DECIMALS)));
+  await withStatus('carol sweep', () => carol.sweep());
+  await withStatus('bob transfer 20.50 cUSD to carol (stays pending)', () => bob.transfer(carolId, parseAmount('20.50', DECIMALS)));
+  await show('carol', carol);
+  log(`issuer has a stored key for carol: ${(await issuer.storedViewingKey(carolId)) ? 'yes' : 'no'}`);
 
-  heading('Viewing key: collected at onboarding, issuer inspects');
-  const bobVk = (await issuer.storedViewingKey(bobId))!;
-  log(`stored viewing key for bob: ${JSON.stringify(bobVk)}`);
-  const inspected = await issuer.inspect(bobVk);
+  heading('Freeze carol (any registered id, known or not)');
+  await withStatus('issuer freeze carol', () => issuer.freeze(carolId));
+  await show('carol', carol);
+  await expectFailure('frozen carol sending', () => carol.transfer(aliceId, 1n), /account frozen/);
+  await expectFailure('sending to frozen carol', () => alice.transfer(carolId, 1n), /account frozen/);
+  await expectFailure('frozen carol burning', () => carol.burn(1n), /account frozen/);
+
+  heading('Compliance key opens the escrow: issuer inspects carol without her cooperation');
+  const carolVk = await withStatus('open carol\'s escrow with the compliance key', () => issuer.escrowedViewingKey(carolId));
+  log(`opened viewing key for carol: ${JSON.stringify(carolVk)}`);
+  log(`matches what carol's own wallet would export: ${carolVk.viewingKey === (await carol.exportViewingKey()).viewingKey}`);
+  const inspected = await issuer.inspect(carolVk);
   log(
-    `issuer sees bob: spendable=${formatAmount(inspected.spendable ?? -1n, DECIMALS)} pending=${formatAmount(inspected.pending ?? -1n, DECIMALS)} ` +
+    `issuer sees carol: spendable=${formatAmount(inspected.spendable ?? -1n, DECIMALS)} pending=${formatAmount(inspected.pending ?? -1n, DECIMALS)} ` +
       `memos=[${inspected.memos.map((m) => formatAmount(m, DECIMALS)).join(', ')}]`,
   );
   await expectFailure(
     'seize with a wrong viewing key',
-    () => issuer.seize({ accountId: bobVk.accountId, viewingKey: CftPrivateState.generate().encryptionKeyHex }, issuerId),
-    /could not recover|ek\/pk mismatch/,
+    () => issuer.seize({ accountId: carolId, viewingKey: CftPrivateState.viewingKeyHex(CftPrivateState.generate()) }, issuerId),
+    /could not recover|could not open|does not match the account/,
   );
+  await expectFailure('alice opening the escrow', () => alice.escrowedViewingKey(carolId), /does not hold the compliance key/);
 
-  heading('Seize bob → issuer treasury');
-  const seized = await withStatus('issuer seize', () => issuer.seize(bobVk, issuerId));
+  heading('Seize carol → issuer treasury');
+  const seized = await withStatus('issuer seize', () => issuer.seizeEscrowed(carolId, issuerId));
   ok(`seized ${formatAmount(seized.amount, DECIMALS)} cUSD in tx ${seized.txId}`);
-  await show('bob', bob);
+  await show('carol', carol);
   await show('issuer', issuer);
   await supply();
   await withStatus('issuer sweep', () => issuer.sweep());
   await show('issuer', issuer);
 
   heading('Unfreeze, pause, unpause');
-  await withStatus('issuer unfreeze bob', () => issuer.unfreeze(bobId));
+  await withStatus('issuer unfreeze carol', () => issuer.unfreeze(carolId));
   await withStatus('issuer pause', () => issuer.pause());
   await expectFailure('transfer while paused', () => alice.transfer(bobId, 1n), /paused/);
   await withStatus('issuer unpause', () => issuer.unpause());
@@ -161,7 +178,7 @@ const main = async () => {
   heading('Summary');
   const token = await issuer.token();
   log(`${token.name} (${token.symbol}), decimals ${token.decimals}, issuer ${token.issuerAccountId}`);
-  log(`totalSupply ${formatAmount(token.totalSupply, DECIMALS)}, onboarded ${token.allowlist.length}, registered ${token.registered}, frozen ${token.frozen.length}, paused ${token.paused}`);
+  log(`totalSupply ${formatAmount(token.totalSupply, DECIMALS)}, registered ${token.registered}, escrowed ${token.escrowed}, frozen ${token.frozen.length}, paused ${token.paused}`);
   log(`DUST left: ${formatAmount(await dustBalance(wallet.wallet), 15)}`);
   ok(`done in ${((Date.now() - started) / 1000).toFixed(0)}s`);
   process.exit(0);

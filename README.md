@@ -2,8 +2,9 @@
 
 A small, complete application around OpenZeppelin's confidential tokens for
 Midnight, in both of their models: the **ConfidentialFungibleToken (CFT)**
-account model (mint, burn, confidential transfer, onboarding, viewing keys,
-freeze, pause, viewing-key-gated seize) and the draft **note model**
+account model (mint, burn, confidential transfer, permissionless registration
+with viewing-key escrow, viewing keys, freeze, pause, seize of any frozen
+account) and the draft **note model**
 (fully private graph, mandatory audit channel, freeze and seize by nullifier).
 The web UI connects to any Midnight DApp-connector wallet (1AM, Lace), shows
 side by side what an explorer sees and what a key holder sees, and the CLI runs
@@ -18,7 +19,7 @@ cft-demo/
     src/{witnesses,crypto,wallet}.ts   account-model wallet layer
     src/note/                   note-model wallet layer
     src/bmt-rehash.ts           indexer Merkle-tree rehash wrapper
-    src/*.test.ts               25 simulator tests
+    src/*.test.ts               27 simulator tests
     src/managed/                compiled output, committed (Vercel cannot run compact)
   cli/        headless deploy + two end-to-end scenarios (seed wallet, local proof server)
   web/        Vite + React UI for 1AM / Lace via the DApp connector API v4
@@ -78,11 +79,15 @@ Key design points, as the module documents them:
 - **Not audited, alpha.** OpenZeppelin ships it as `0.3.0-alpha` / `0.4.0-alpha`.
 - **Single receiver, no auditor copy, no freeze, no seize** in the base. OZ
   explicitly defers these to companion modules. This demo adds freeze and
-  pause in the wrapper, and a seize that works only when the issuer holds the
-  account's viewing key. Without the key a seize is cryptographically
-  impossible (the circuit cannot learn or prove the amount), so the demo makes
-  key disclosure a condition of onboarding: `register` is allowlist-gated and
-  the issuer's onboarding action stores the holder's viewing key.
+  pause in the wrapper, and a seize that needs the account's viewing key.
+  Without the key a seize is cryptographically impossible (the circuit cannot
+  learn or prove the amount), so the demo escrows the key at registration:
+  `register` is permissionless, but the same proof encrypts the caller's
+  viewing key to a compliance key fixed at deployment and shows it is the key
+  behind the public key being registered. Receiving requires registration, so
+  every holder, including a wallet the issuer has never heard of, can be
+  frozen and seized: the confidential counterpart of ERC-7943's
+  `forceTransfer` and ERC-3643's forced transfers, without an allowlist.
 - **Counterparty graph is public.** Amounts are hidden, who-paid-whom is not.
 - **Wallet responsibilities are load-bearing.** A fresh CSPRNG randomness seed
   per transaction is mandatory (seed reuse leaks amount differences), and the
@@ -131,11 +136,11 @@ read access per account without a global backdoor.
 |---|---|---|
 | OZ source | `ConfidentialFungibleToken`, tag v0.3.0-alpha.2 | `ConfidentialNoteFungibleToken` + extensions, branch `feat/hybrid-confidential-token` (draft) |
 | State | encrypted balance per public accountId | notes (value, nonce) in a Merkle tree, spent by nullifier |
-| Public sees | who paid whom, total supply, freeze/onboard flags | commitments, nullifiers, ciphertexts only; supply encrypted |
+| Public sees | who paid whom, total supply, freeze flags, one escrow ciphertext per account | commitments, nullifiers, ciphertexts only; supply encrypted |
 | Amounts | hidden (mint/burn leak via supply) | hidden, including mint and burn |
-| Compliance | per-account: onboarding allowlist, freeze, viewing-key seize | structural: mandatory audit channel; authority freezes/seizes single notes with no key escrow |
-| Viewing | holder discloses EK at onboarding | audit key opens every output by construction |
-| Circuits | 9 (k up to 16), deploy 24 KB | 5 (transfer k=18), deploy ~12 KB; prover keys 222 MB |
+| Compliance | per-account: viewing key escrowed at (permissionless) registration, freeze, seize of any frozen account | structural: mandatory audit channel; authority freezes/seizes single notes with no key escrow |
+| Viewing | the register proof escrows the viewing key to the compliance key | audit key opens every output by construction |
+| Circuits | 8 (k up to 16), deploy ~25 KB | 5 (transfer k=18), deploy ~12 KB; prover keys 222 MB |
 | Wallet | cache + memos, one balance | scan deliveries, one input note per spend, change note |
 
 Pick the model by whether the transaction graph may be public. The web UI
@@ -182,19 +187,23 @@ comes from there. These files are not edited; the only difference from OZ
   decode needs (`contract/src/bmt-rehash.ts`).
 - **Contract wrapper** (`contract/src/cft-demo.compact`): composes the OZ
   modules and adds the compliance policy the CFT deliberately leaves to the
-  deployer: the onboarding allowlist gating `register`; issuer-gated `mint`
-  and holder `burn`, each paired with the supply extension; `setFrozen`,
-  checked on both sides of a transfer via OZ's returned-caller-id pattern;
-  `setPaused`; `seize`, which takes the frozen account's viewing key as a
-  witness and proves the amount before moving it; and the pure helpers the
-  wallet uses (`decryptMemo`, `decryptToPoint`, `valuePoint`, ...).
+  deployer: viewing-key escrow inside `register` (permissionless; the proof
+  binds the escrowed scalar to the registered public key and encrypts it to
+  the compliance key); issuer-gated `mint` and holder `burn`, each paired
+  with the supply extension; `setFrozen`, checked on both sides of a transfer
+  via OZ's returned-caller-id pattern; `setPaused`; `seize`, which takes the
+  frozen account's viewing scalar (opened from the escrow) as a witness and
+  proves it is the account's key and opens the balance to the claimed amount
+  before moving it; and the pure helpers the wallet uses (`viewingScalar`,
+  `openEscrow`, `decryptMemo`, `decryptToPoint`, `valuePoint`, ...).
 - **Wallet layer** (`contract/src/witnesses.ts`, `crypto.ts`, `wallet.ts`):
   OZ ships only a test witness with a fixed seed and no wallet. This is the
   production-style counterpart its module header says an integration must
   build: private state and witnesses, per-transaction seed rotation,
   memo-based pending balances, candidate-verified spendable balances,
-  bounded discrete-log recovery, viewing-key export/import, formatting.
-- **Tests** (`contract/src/cft-demo.test.ts`): 14 simulator tests over the
+  bounded discrete-log recovery, escrow opening and verification, viewing-key
+  export/import, formatting.
+- **Tests** (`contract/src/cft-demo.test.ts`): 17 simulator tests over the
   composed contract.
 - **CLI** (`cli/`): seed-wallet lifecycle (adapted from the mnf-se-examples
   reference), the midnight-js client, the deploy script, the end-to-end
@@ -209,9 +218,10 @@ comes from there. These files are not edited; the only difference from OZ
 
 Swap this wrapper out and everything in `contract/src/oz/` is still a working
 CFT; swap OZ out and nothing here works. Two design decisions are this
-project's rather than the standard's: making viewing-key disclosure a
-condition of onboarding, and defining seize as "prove the amount with the
-disclosed key, then move it", one concrete way to fill the gap OZ documents.
+project's rather than the standard's: escrowing the viewing key to a
+compliance key inside the registration proof, and defining seize as "prove the
+amount with the escrowed key, then move it", one concrete way to fill the gap
+OZ documents.
 
 ## The demo contract
 
@@ -219,20 +229,32 @@ disclosed key, then move it", one concrete way to fill the gap OZ documents.
 
 | Circuit | Who | What |
 |---|---|---|
-| `setOnboarded(a, bool)` | issuer | allowlist maintenance; onboarding is where the issuer collects the holder's viewing key off-chain (KYC) |
-| `register()` | onboarded accounts | registers EK-derived public key, balance = Enc(0); fails for accounts not onboarded |
+| `register()` | anyone | registers the EK-derived public key, balance = Enc(0), and writes `escrow[id] = Enc_compliance(viewing scalar)`, proving `g^scalar` equals the key just registered |
 | `sweep()` | holder | pending → spendable |
 | `transfer(to, value)` | holder | confidential transfer; blocked if paused or either side frozen |
 | `burn(value)` | holder | debit own balance, `totalSupply -= value` |
 | `mint(to, value)` | issuer | `totalSupply += value`, credit `to` |
 | `setFrozen(a, bool)` | issuer | maintain the frozen set |
 | `setPaused(bool)` | issuer | circuit breaker for value movement |
-| `seize(account, to)` | issuer | requires frozen account and the account's **viewing key** as a witness; proves `Dec(balance, EK) == amount`, zeroes the account, credits `to` the same amount (supply conserved, amount not disclosed) |
+| `seize(account, to)` | issuer | requires a frozen account; the issuer's wallet opens the account's escrow with the compliance secret and supplies the viewing scalar `s` and the amount; the proof checks `g^s == pk` and `Dec(balance, s) == amount`, zeroes the account, credits `to` the same amount (supply conserved, amount not disclosed) |
 
-Pure helpers (`computeAccountId`, `derivePk`, `decryptMemo`, `decryptToPoint`,
-`valuePoint`, `addCiphertexts`) run locally with no proof and back the wallet
-and viewer code. Balances, memos, supply, frozen set and metadata are read
-directly from the public ledger state.
+The constructor takes `(name, symbol, decimals, issuer, compliancePk)`. The
+demo passes the issuer's own encryption public key as the compliance key, so
+one browser plays both roles; a production deployment would pass a separate
+key (a regulator's, or a threshold key) and the issuer alone could not read
+balances.
+
+The escrow is the ECDH mask OZ uses for memos, applied to the viewing scalar:
+`{ephemeralPk: g^e, ct: s + KDF(compliancePk^e, "CFTDemo_escrow_v1")}`.
+What is escrowed is `s = secretToScalar(EK)`, a hash of the 32-byte EK, which
+is everything a viewer needs (memos and balances decrypt with `s`) and is what
+"viewing key" means throughout the wallet API and exports.
+
+Pure helpers (`computeAccountId`, `derivePk`, `viewingScalar`, `openEscrow`,
+`decryptMemo`, `decryptToPoint`, `valuePoint`, `addCiphertexts`) run locally
+with no proof and back the wallet and viewer code. Balances, memos, supply,
+escrow, frozen set and metadata are read directly from the public ledger
+state.
 
 ## Running it
 
@@ -243,15 +265,16 @@ Prerequisites: Node 22, Docker, the `compact` devtools with toolchain 0.31.1
 cd cft-demo
 npm install
 npm run build:contract          # compact compile +0.31.1 → keys/zkir/TS, then tsc
-npm test                        # 25 simulator tests: 15 account model, 10 note model
+npm test                        # 27 simulator tests: 17 account model, 10 note model
 ```
 
 ### Headless end-to-end on a local network
 
 ```bash
 npm run docker:standalone       # node 1.0.2 + indexer 4.3.5 + proof server 8.1.0 (genesis wallet is funded)
-npm run e2e:standalone          # account model: deploy, onboard, register, mint, sweep, transfer,
-                                # burn, freeze, viewing-key inspect, seize, pause
+npm run e2e:standalone          # account model: deploy, register (keys escrowed), mint, sweep,
+                                # transfer, burn, a wallet the issuer never met, freeze, open its
+                                # escrow, inspect, seize, pause
 npm run e2e-note:standalone     # note model: deploy, mint, private transfer, burn, audit trail,
                                 # freeze by nullifier, seize
 npm run docker:down
@@ -278,9 +301,8 @@ npm run web                     # http://localhost:5174
    address seeds a browser-local CFT identity (SK + viewing key).
 2. **Deploy** a token (you become issuer) or **Join** an address someone gave
    you. Deployment from a CLI: `SEED=… npm -w cft-demo-cli run deploy:preview`.
-3. Get **onboarded**: copy your viewing key (panel 3) and send it to the
-   issuer, who pastes it into "Onboard holder" (panel 5). The issuer is
-   onboarded automatically. Then **Register**, have the issuer **Mint** to your
+3. **Register** (panel 3; no permission needed: the proof also escrows your
+   viewing key to the compliance key), have the issuer **Mint** to your
    `accountId`, **Sweep**, **Send confidentially** to another wallet's
    `accountId`, **Burn**.
 4. **Copy viewing key** and paste it into the viewer panel of any other
@@ -291,11 +313,14 @@ npm run web                     # http://localhost:5174
    ids involved, fee, total supply, opaque ciphertexts) next to what the
    viewing-key holder reads (amounts, balances, credit history). The Account
    tab does the same for any accountId.
-6. Issuer: **Freeze** (one account) or **Pause** (the whole token) in panel 5.
-   Seize lives in panel 6: load the holder's stored viewing key ("load key in
-   panel 6" on their row), **Inspect**, then **Seize** into a treasury account
-   that differs from the seized one. The Seize box lists the three conditions
-   (frozen, balance known, distinct treasury) and which are met.
+6. Issuer: **Freeze** (one account) or **Pause** (the whole token) in panel 5,
+   which lists every registered account. Seize lives in panel 6: pick any
+   account ("open key → panel 6" on its row, or type its `accountId`): the
+   browser decrypts its escrow with the compliance key, inspects it, and
+   **Seize** moves the balance into a treasury account that differs from the
+   seized one. The holder is never asked for anything. The Seize box lists the
+   three conditions (frozen, balance known, distinct treasury) and which are
+   met.
 7. Note model: choose "Note model" when deploying (panel 2; joining detects
    the model). Panel 3 shows your notes and your **payment address** (spend
    key + delivery key) instead of an accountId; there is no registration.
@@ -308,17 +333,16 @@ Things the UI does for you, and their edge cases:
 
 - **Spendable balance.** Shown with its source: cache, verified expected value
   after your own move, sum of memos (never-spent account), supply
-  reconciliation (issuer only: total supply minus every onboarded holder's
-  balance, using the stored viewing keys), or bounded recovery. If none of
+  reconciliation (compliance-key holder only: total supply minus every other
+  registered account's balance, opened from the escrows), or bounded recovery. If none of
   those resolves, a field asks for the figure; a wrong value is refused, since
   it is checked against the ciphertext.
 - **Private state per wallet and contract.** Your identity (SK, viewing key)
   is in localStorage per wallet address; the cache, expected values and the
-  issuer's stored viewing keys are in the wallet's private-state store per
+  viewing keys opened from escrows are in the wallet's private-state store per
   wallet address and contract. Rejoining keeps all of it (see the midnight-js
-  note below). If a holder's key is ever missing, paste their viewing key into
-  panel 5 and use **Store key only**: no transaction, the account stays
-  onboarded.
+  note below), and an opened key that goes missing is simply opened again from
+  the chain.
 - **Errors.** Ledger `Custom error: 170` means the node rejected the DUST fee
   proof the wallet attached (stale wallet DUST state, or a wallet/prover on a
   different ledger version than the network); the banner explains it. "Would
@@ -386,10 +410,17 @@ machine; use it only for local development.
   the memos (it is always the sum of the newest k memos, checked against the
   ciphertext), for any amount. `spendable` is resolved in order: wallet cache;
   values the wallet expected after its own last moves; the sum of all memos
-  (exact for an account that swept and never spent); for the issuer, total
-  supply minus every onboarded holder's balance opened with their stored keys;
-  bounded recovery; finally a holder-typed value. Each candidate is accepted
+  (exact for an account that swept and never spent); for the compliance-key
+  holder, total supply minus every other account's balance opened from the
+  escrows; bounded recovery; finally a holder-typed value. Each candidate is accepted
   only if `verifyBalance` shows it is the ciphertext's plaintext.
+- **Escrow** (`contract/src/wallet.ts`, `openEscrowedKey`): the compliance
+  holder decrypts `escrow[id]` with its EK through the pure `openEscrow`, and
+  accepts the result only if `g^s` equals the account's registered public key
+  (a wrong compliance key opens to garbage and is rejected locally, the same
+  check the `seize` circuit enforces). Opened keys are cached in the private
+  state under `viewingKeys` and feed `wit_ViewingScalar`; the holder's own
+  registration answers that witness from its EK.
 - **Note wallet** (`contract/src/note/`): identities are a spend key
   (`pk = Hf(sk)`) and a delivery scalar (`encPk = g^encSk`); a payment address
   is both. Notes are found by opening every delivery with the delivery secret
@@ -422,6 +453,10 @@ license in `contract/src/oz/LICENSE`).
   `crypto/EcdhMask.compact`, `token/extensions/ConfidentialFungibleTokenPublicSupply.compact`;
   note model on branch `feat/hybrid-confidential-token`, design doc
   `contracts/src/token/docs/hybrid-confidential-token.md`)
+- RWA compliance standards the escrow design mirrors: ERC-7943 uRWA
+  (`setFrozen`, `forceTransfer`, `canTransfer`) https://eips.ethereum.org/EIPS/eip-7943;
+  ERC-3643 https://eips.ethereum.org/EIPS/eip-3643; ERC-7540 asynchronous vaults
+  (exit-side control for RWA redemptions) https://eips.ethereum.org/EIPS/eip-7540
 - 1AM mobile wallet (in-app dApp browser): https://apps.apple.com/app/1am-wallet/id6761093596
 - Midnight compatibility matrix: https://docs.midnight.network/relnotes/support-matrix
 - Midnight DApp connector API: https://docs.midnight.network/api-reference/dapp-connector

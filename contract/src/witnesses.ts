@@ -9,14 +9,17 @@
 //   wit_RandomnessSeed       32 fresh, secret bytes per invocation
 //   wit_OwnableSK            issuer identity (we reuse SK, so the issuer's
 //                            Ownable id equals its CFT accountId)
-//   wit_ViewingKey(account)  a holder's EK the issuer holds (seize only)
+//   wit_ViewingScalar(a)     the viewing scalar of account `a`: our own at
+//                            register (escrowed on-chain), or one the issuer
+//                            opened from the escrow / was handed (seize)
+//   wit_EscrowRandomness     fresh ephemeral scalar for the escrow ciphertext
 //   wit_ViewedBalance(ct)    the amount the issuer recovered for `ct` (seize)
 //
 // Private state is plain JSON (hex strings, decimal strings) so it can be
 // exported, imported and persisted by any private-state provider.
 import type { WitnessContext } from '@midnight-ntwrk/compact-runtime';
 import type { ElGamal_Ciphertext, Ledger, Witnesses } from './managed/cft-demo/contract/index.js';
-import { ctKey, fromHex, isZeroCiphertext, randomBytes32, toHex } from './crypto.js';
+import { accountIdFromSecretKey, bytesEqual, ctKey, fromHex, hexToScalar, isZeroCiphertext, randomBytes32, randomEscrowScalar, scalarToHex, toHex, viewingScalar } from './crypto.js';
 
 export type CftPrivateState = {
   /** 32-byte account secret (hex). Identity for CFT and, for the issuer, Ownable. */
@@ -27,7 +30,10 @@ export type CftPrivateState = {
   readonly randomnessSeedHex?: string;
   /** ciphertext key -> plaintext (decimal string). */
   readonly plaintextCache: Record<string, string>;
-  /** Issuer only: accountId (hex) -> viewing key (hex) disclosed by holders. */
+  /**
+   * Issuer only: accountId (hex) -> viewing scalar (hex), opened from the
+   * on-chain escrow with the compliance secret or disclosed by the holder.
+   */
   readonly viewingKeys: Record<string, string>;
   /** Issuer only: ciphertext key -> amount recovered with a viewing key. */
   readonly viewedBalances: Record<string, string>;
@@ -79,9 +85,15 @@ export const CftPrivateState = {
     spendableCandidates: [value.toString(), ...(s.spendableCandidates ?? []).filter((v) => v !== value.toString())].slice(0, 16),
   }),
 
-  withViewingKey: (s: CftPrivateState, accountIdHex: string, ekHex: string): CftPrivateState => ({
+  /** Our own accountId (hex). */
+  accountIdHex: (s: CftPrivateState): string => toHex(accountIdFromSecretKey(fromHex(s.secretKeyHex))),
+
+  /** Our own viewing scalar (hex): what viewers need and what `register` escrows. */
+  viewingKeyHex: (s: CftPrivateState): string => scalarToHex(viewingScalar(fromHex(s.encryptionKeyHex))),
+
+  withViewingKey: (s: CftPrivateState, accountIdHex: string, viewingKeyHex: string): CftPrivateState => ({
     ...s,
-    viewingKeys: { ...s.viewingKeys, [accountIdHex.toLowerCase()]: ekHex.toLowerCase() },
+    viewingKeys: { ...s.viewingKeys, [accountIdHex.toLowerCase()]: viewingKeyHex.toLowerCase() },
   }),
 
   withViewedBalance: (s: CftPrivateState, ct: ElGamal_Ciphertext, amount: bigint): CftPrivateState => ({
@@ -126,10 +138,21 @@ export const witnesses: Witnesses<CftPrivateState> = {
     return [fresh, fromHex(fresh.randomnessSeedHex!)];
   },
 
-  wit_ViewingKey({ privateState }: Ctx, account: Uint8Array): [CftPrivateState, Uint8Array] {
-    const ek = privateState.viewingKeys[toHex(account)];
-    if (!ek) throw new Error(`wit_ViewingKey: no viewing key imported for account ${toHex(account)}`);
-    return [privateState, fromHex(ek)];
+  wit_ViewingScalar({ privateState }: Ctx, account: Uint8Array): [CftPrivateState, bigint] {
+    // Our own account (register): derive from EK. Someone else's (seize): the
+    // scalar the app opened from the escrow or imported from the holder.
+    if (bytesEqual(account, accountIdFromSecretKey(fromHex(privateState.secretKeyHex)))) {
+      return [privateState, viewingScalar(fromHex(privateState.encryptionKeyHex))];
+    }
+    const stored = privateState.viewingKeys[toHex(account)];
+    if (!stored) {
+      throw new Error(`wit_ViewingScalar: no viewing key for account ${toHex(account)}; open its escrow with the compliance key first`);
+    }
+    return [privateState, hexToScalar(stored)];
+  },
+
+  wit_EscrowRandomness({ privateState }: Ctx): [CftPrivateState, bigint] {
+    return [privateState, randomEscrowScalar()];
   },
 
   wit_ViewedBalance({ privateState }: Ctx, ct: ElGamal_Ciphertext): [CftPrivateState, bigint] {

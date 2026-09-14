@@ -8,10 +8,21 @@ import {
   sampleContractAddress,
 } from '@midnight-ntwrk/compact-runtime';
 import { describe, expect, it } from 'vitest';
-import { Contract, ledger, type Ledger } from './managed/cft-demo/contract/index.js';
+import { Contract, ledger, type Ledger, type Witnesses } from './managed/cft-demo/contract/index.js';
 import { CftPrivateState, witnesses } from './witnesses.js';
-import { accountIdFromSecretKey, addCiphertexts, fromHex, toHex, verifyBalance } from './crypto.js';
-import { formatAmount, memoHistory, parseAmount, readAccount, readToken, resolveBalance, resolvePending, resolveSpendable } from './wallet.js';
+import { accountIdFromSecretKey, addCiphertexts, derivePk, fromHex, hexToScalar, pointKey, randomEscrowScalar, toHex, verifyBalance } from './crypto.js';
+import {
+  formatAmount,
+  holdsComplianceKey,
+  memoHistory,
+  openEscrowedKey,
+  parseAmount,
+  readAccount,
+  readToken,
+  resolveBalance,
+  resolvePending,
+  resolveSpendable,
+} from './wallet.js';
 
 type Actor = { name: string; state: CftPrivateState; id: string };
 
@@ -19,18 +30,23 @@ const actor = (name: string): Actor => {
   const state = CftPrivateState.generate();
   return { name, state, id: toHex(accountIdFromSecretKey(fromHex(state.secretKeyHex))) };
 };
+/** The actor's viewing key (scalar hex), as its wallet would export it. */
+const vk = (a: Actor) => CftPrivateState.viewingKeyHex(a.state);
 
 class Sim {
-  readonly contract = new Contract<CftPrivateState>(witnesses);
+  readonly contract: Contract<CftPrivateState>;
   ctx: CircuitContext<CftPrivateState>;
 
-  constructor(issuer: Actor, name = 'Confidential Dollar', symbol = 'cUSD', decimals = 2n) {
+  /** The deployer's EK doubles as the compliance key, as the demo does. */
+  constructor(issuer: Actor, wit: Witnesses<CftPrivateState> = witnesses, name = 'Confidential Dollar', symbol = 'cUSD', decimals = 2n) {
+    this.contract = new Contract<CftPrivateState>(wit);
     const { currentPrivateState, currentContractState } = this.contract.initialState(
       createConstructorContext(issuer.state, '0'.repeat(64)),
       name,
       symbol,
       decimals,
       fromHex(issuer.id),
+      derivePk(fromHex(issuer.state.encryptionKeyHex)),
     );
     this.ctx = createCircuitContext(sampleContractAddress(), '0'.repeat(64), currentContractState, currentPrivateState);
   }
@@ -51,7 +67,7 @@ class Sim {
   /** Make sure the actor's cache knows its current spendable balance (as the app does before a debit). */
   syncSpendable(who: Actor): bigint {
     const view = readAccount(this.ledger(), who.id);
-    const r = resolveSpendable(view, who.state.encryptionKeyHex, who.state);
+    const r = resolveSpendable(view, vk(who), who.state);
     if (r.value === undefined || !view.spendableCt) throw new Error('balance unknown');
     who.state = CftPrivateState.cachePlaintext(who.state, view.spendableCt, r.value);
     return r.value;
@@ -59,8 +75,8 @@ class Sim {
 
   balances(who: Actor): { spendable: bigint; pending: bigint } {
     const view = readAccount(this.ledger(), who.id);
-    const spendable = resolveSpendable(view, who.state.encryptionKeyHex, who.state).value;
-    const pending = resolvePending(view, who.state.encryptionKeyHex).value;
+    const spendable = resolveSpendable(view, vk(who), who.state).value;
+    const pending = resolvePending(view, vk(who)).value;
     if (spendable === undefined || pending === undefined) throw new Error('balance unknown');
     return { spendable, pending };
   }
@@ -94,12 +110,6 @@ class Sim {
   unpause(issuer: Actor) {
     return this.as(issuer, (c) => this.contract.impureCircuits.setPaused(c, false));
   }
-  onboard(issuer: Actor, who: Actor) {
-    return this.as(issuer, (c) => this.contract.impureCircuits.setOnboarded(c, fromHex(who.id), true));
-  }
-  offboard(issuer: Actor, who: Actor) {
-    return this.as(issuer, (c) => this.contract.impureCircuits.setOnboarded(c, fromHex(who.id), false));
-  }
   seize(issuer: Actor, target: Actor, to: Actor) {
     return this.as(issuer, (c) => this.contract.impureCircuits.seize(c, fromHex(target.id), fromHex(to.id)));
   }
@@ -110,16 +120,15 @@ const setup = () => {
   const alice = actor('alice');
   const bob = actor('bob');
   const sim = new Sim(issuer);
-  sim.register(issuer); // pre-onboarded by the constructor
-  sim.onboard(issuer, alice);
-  sim.onboard(issuer, bob);
+  // Permissionless: nobody asks the issuer before registering.
+  sim.register(issuer);
   sim.register(alice);
   sim.register(bob);
   return { sim, issuer, alice, bob };
 };
 
 describe('CFT demo: lifecycle', () => {
-  it('deploys with metadata and issuer', () => {
+  it('deploys with metadata, issuer and compliance key', () => {
     const { sim, issuer } = setup();
     const info = readToken(sim.ledger());
     expect(info.name).toBe('Confidential Dollar');
@@ -128,7 +137,11 @@ describe('CFT demo: lifecycle', () => {
     expect(info.totalSupply).toBe(0n);
     expect(info.issuerAccountId).toBe(issuer.id);
     expect(info.registered).toBe(3);
+    expect(info.escrowed).toBe(3);
     expect(info.paused).toBe(false);
+    expect(info.complianceKey).toBe(pointKey(derivePk(fromHex(issuer.state.encryptionKeyHex))));
+    expect(holdsComplianceKey(sim.ledger(), issuer.state.encryptionKeyHex)).toBe(true);
+    expect(holdsComplianceKey(sim.ledger(), CftPrivateState.generate().encryptionKeyHex)).toBe(false);
   });
 
   it('mint lands in pending, sweep makes it spendable, totalSupply is public', () => {
@@ -138,25 +151,35 @@ describe('CFT demo: lifecycle', () => {
     expect(sim.balances(alice)).toEqual({ spendable: 0n, pending: 100_000n });
 
     // The memo delivers the exact amount to the recipient's viewing key.
-    expect(memoHistory(readAccount(sim.ledger(), alice.id), alice.state.encryptionKeyHex)).toEqual([100_000n]);
+    expect(memoHistory(readAccount(sim.ledger(), alice.id), vk(alice))).toEqual([100_000n]);
 
     sim.sweep(alice);
     expect(sim.balances(alice)).toEqual({ spendable: 100_000n, pending: 0n });
   });
 
-  it('only onboarded accounts can register; offboarding revokes it', () => {
-    const { sim, issuer, alice } = setup();
-    const carol = actor('carol');
-    expect(() => sim.register(carol)).toThrow(/not onboarded/);
-    expect(() => sim.onboard(alice, carol)).toThrow(/caller is not the owner/);
-    sim.onboard(issuer, carol);
-    expect(readToken(sim.ledger()).allowlist).toContain(carol.id);
-    expect(readAccount(sim.ledger(), carol.id).onboarded).toBe(true);
-    sim.offboard(issuer, carol);
-    expect(() => sim.register(carol)).toThrow(/not onboarded/);
-    sim.onboard(issuer, carol);
+  it('register is permissionless and escrows the viewing key to the compliance key', () => {
+    const { sim, issuer } = setup();
+    const carol = actor('carol'); // a wallet in the wild: never talked to the issuer
     sim.register(carol);
-    expect(readAccount(sim.ledger(), carol.id).registered).toBe(true);
+    const l = sim.ledger();
+    expect(readAccount(l, carol.id)).toMatchObject({ registered: true, escrowed: true });
+    expect(readToken(l).escrowed).toBe(4);
+    // The compliance secret opens the escrow to exactly Carol's viewing key...
+    expect(openEscrowedKey(l, carol.id, issuer.state.encryptionKeyHex)).toBe(vk(carol));
+    // ...and a wrong secret opens it to garbage, which the pk check rejects.
+    expect(openEscrowedKey(l, carol.id, CftPrivateState.generate().encryptionKeyHex)).toBeUndefined();
+    expect(() => sim.register(carol)).toThrow(/already registered/);
+  });
+
+  it('the escrow is bound to the registered key: escrowing a different scalar fails the proof', () => {
+    const issuer = actor('issuer');
+    const cheating: Witnesses<CftPrivateState> = {
+      ...witnesses,
+      wit_ViewingScalar: ({ privateState }) => [privateState, randomEscrowScalar()],
+    };
+    const sim = new Sim(issuer, cheating);
+    expect(() => sim.register(issuer)).toThrow(/viewing key does not match the account/);
+    expect(readToken(sim.ledger()).escrowed).toBe(0);
   });
 
   it('non-issuer cannot mint', () => {
@@ -173,12 +196,24 @@ describe('CFT demo: lifecycle', () => {
 
     expect(sim.balances(alice)).toEqual({ spendable: 70_000n, pending: 0n });
     expect(sim.balances(bob)).toEqual({ spendable: 0n, pending: 30_000n });
-    expect(memoHistory(readAccount(sim.ledger(), bob.id), bob.state.encryptionKeyHex)).toEqual([30_000n]);
+    expect(memoHistory(readAccount(sim.ledger(), bob.id), vk(bob))).toEqual([30_000n]);
 
     // Bob's viewing key does not open Alice's balance.
     const aliceView = readAccount(sim.ledger(), alice.id);
-    expect(verifyBalance(aliceView.spendableCt!, fromHex(bob.state.encryptionKeyHex), 70_000n)).toBe(false);
-    expect(verifyBalance(aliceView.spendableCt!, fromHex(alice.state.encryptionKeyHex), 70_000n)).toBe(true);
+    expect(verifyBalance(aliceView.spendableCt!, hexToScalar(vk(bob)), 70_000n)).toBe(false);
+    expect(verifyBalance(aliceView.spendableCt!, hexToScalar(vk(alice)), 70_000n)).toBe(true);
+  });
+
+  it('a wrong viewing key opens nothing and never throws', () => {
+    const { sim, issuer, alice } = setup();
+    sim.mint(issuer, alice, 1_000n);
+    sim.sweep(alice);
+    sim.mint(issuer, alice, 5n);
+    const view = readAccount(sim.ledger(), alice.id);
+    const wrong = CftPrivateState.viewingKeyHex(CftPrivateState.generate());
+    expect(resolvePending(view, wrong)).toEqual({ value: undefined, source: 'unknown' });
+    expect(resolveSpendable(view, wrong)).toEqual({ value: undefined, source: 'unknown' });
+    expect(resolvePending(view, vk(alice))).toEqual({ value: 5n, source: 'memos' });
   });
 
   it('rejects overspend and self-transfer', () => {
@@ -204,9 +239,9 @@ describe('CFT demo: lifecycle', () => {
     sim.mint(issuer, alice, big);
     sim.mint(issuer, alice, 7n);
     const view = readAccount(sim.ledger(), alice.id);
-    expect(resolvePending(view, alice.state.encryptionKeyHex)).toEqual({ value: big + 7n, source: 'memos' });
+    expect(resolvePending(view, vk(alice))).toEqual({ value: big + 7n, source: 'memos' });
     // Spendable is still zero (nothing swept) and is recognised as such.
-    expect(resolveSpendable(view, alice.state.encryptionKeyHex, alice.state)).toEqual({ value: 0n, source: 'zero' });
+    expect(resolveSpendable(view, vk(alice), alice.state)).toEqual({ value: 0n, source: 'zero' });
   });
 
   it('spendable follows the wallet arithmetic via candidates, with no cache and no recovery', () => {
@@ -218,17 +253,17 @@ describe('CFT demo: lifecycle', () => {
     sim.sweep(alice);
     alice.state = { ...alice.state, plaintextCache: {} };
     let view = readAccount(sim.ledger(), alice.id);
-    expect(resolveSpendable(view, alice.state.encryptionKeyHex, alice.state)).toEqual({ value: big, source: 'candidate' });
+    expect(resolveSpendable(view, vk(alice), alice.state)).toEqual({ value: big, source: 'candidate' });
 
     // Transfer: the candidate is old - value, and the spend needs the cache primed (syncSpendable does that).
     alice.state = CftPrivateState.withSpendableCandidate(alice.state, big - 5n);
     sim.transfer(alice, bob, 5n);
     alice.state = { ...alice.state, plaintextCache: {} };
     view = readAccount(sim.ledger(), alice.id);
-    expect(resolveSpendable(view, alice.state.encryptionKeyHex, alice.state)).toEqual({ value: big - 5n, source: 'candidate' });
+    expect(resolveSpendable(view, vk(alice), alice.state)).toEqual({ value: big - 5n, source: 'candidate' });
     // A stranger with the viewing key but no bookkeeping cannot open it (bound), a holder claim verifies.
-    expect(resolveSpendable(view, alice.state.encryptionKeyHex)).toEqual({ value: undefined, source: 'unknown' });
-    expect(verifyBalance(view.spendableCt!, fromHex(alice.state.encryptionKeyHex), big - 5n)).toBe(true);
+    expect(resolveSpendable(view, vk(alice))).toEqual({ value: undefined, source: 'unknown' });
+    expect(verifyBalance(view.spendableCt!, hexToScalar(vk(alice)), big - 5n)).toBe(true);
   });
 
   it('a never-spent account recovers its spendable from memos alone, above the recovery bound', () => {
@@ -238,7 +273,7 @@ describe('CFT demo: lifecycle', () => {
     sim.sweep(alice);
     alice.state = { ...alice.state, plaintextCache: {}, spendableCandidates: [] };
     const view = readAccount(sim.ledger(), alice.id);
-    expect(resolveSpendable(view, alice.state.encryptionKeyHex, alice.state)).toEqual({ value: big, source: 'memos' });
+    expect(resolveSpendable(view, vk(alice), alice.state)).toEqual({ value: big, source: 'memos' });
   });
 
   it('recovers a balance from the ciphertext alone when the cache is lost', () => {
@@ -246,7 +281,7 @@ describe('CFT demo: lifecycle', () => {
     sim.mint(issuer, alice, 123_456_789n); // > 2^16, exercises giant steps
     sim.sweep(alice);
     alice.state = { ...alice.state, plaintextCache: {} };
-    const r = resolveBalance(readAccount(sim.ledger(), alice.id).spendableCt, alice.state.encryptionKeyHex, alice.state);
+    const r = resolveBalance(readAccount(sim.ledger(), alice.id).spendableCt, vk(alice), alice.state);
     expect(r).toEqual({ value: 123_456_789n, source: 'recovered' });
   });
 });
@@ -284,44 +319,52 @@ describe('CFT demo: compliance', () => {
     sim.transfer(alice, bob, 1n);
   });
 
-  it('seize requires the frozen account viewing key and conserves supply', () => {
-    const { sim, issuer, alice, bob } = setup();
-    sim.mint(issuer, bob, 5_000n);
-    sim.sweep(bob);
-    sim.mint(issuer, bob, 250n); // leave something pending too
+  it('seizes a wallet in the wild from its escrow alone, conserving supply', () => {
+    const { sim, issuer, alice } = setup();
+    // Carol never contacted the issuer; she received tokens from Alice.
+    const carol = actor('carol');
+    sim.register(carol);
+    sim.mint(issuer, alice, 10_000n);
+    sim.sweep(alice);
+    sim.transfer(alice, carol, 5_000n);
+    sim.sweep(carol);
+    sim.transfer(alice, carol, 250n); // leave something pending too
     const supplyBefore = readToken(sim.ledger()).totalSupply;
 
     // Not frozen yet.
-    expect(() => sim.seize(issuer, bob, issuer)).toThrow(/requires a frozen account/);
-    sim.freeze(issuer, bob);
+    expect(() => sim.seize(issuer, carol, issuer)).toThrow(/requires a frozen account/);
+    sim.freeze(issuer, carol);
 
-    // Issuer has no viewing key for Bob: the witness cannot answer.
-    expect(() => sim.seize(issuer, bob, issuer)).toThrow(/no viewing key/);
+    // Issuer wallet has not opened the escrow yet: the witness cannot answer.
+    expect(() => sim.seize(issuer, carol, issuer)).toThrow(/no viewing key/);
 
-    // A wrong viewing key fails the in-circuit key check.
-    const wrongKey = CftPrivateState.generate().encryptionKeyHex;
-    issuer.state = CftPrivateState.withViewingKey(issuer.state, bob.id, wrongKey);
-    const bobView = readAccount(sim.ledger(), bob.id);
-    const total = { spendable: bobView.spendableCt!, pending: bobView.pendingCt! };
-    const totalCt = addCiphertexts(total.spendable, total.pending);
+    // A wrong scalar fails the in-circuit key check.
+    const carolView = readAccount(sim.ledger(), carol.id);
+    const totalCt = addCiphertexts(carolView.spendableCt!, carolView.pendingCt!);
+    issuer.state = CftPrivateState.withViewingKey(issuer.state, carol.id, CftPrivateState.viewingKeyHex(CftPrivateState.generate()));
     issuer.state = CftPrivateState.withViewedBalance(issuer.state, totalCt, 5_250n);
-    expect(() => sim.seize(issuer, bob, issuer)).toThrow(/ek\/pk mismatch/);
+    expect(() => sim.seize(issuer, carol, issuer)).toThrow(/viewing key does not match the account/);
 
-    // Bob (or a court order) discloses the real viewing key: the viewer
-    // recovers the exact total from the chain, then the seizure proves it.
-    issuer.state = CftPrivateState.withViewingKey(issuer.state, bob.id, bob.state.encryptionKeyHex);
-    const recovered = resolveBalance(totalCt, bob.state.encryptionKeyHex).value;
+    // The real path: open Carol's escrow with the compliance secret, recover
+    // the exact total from the chain, then the seizure proves it.
+    const opened = openEscrowedKey(sim.ledger(), carol.id, issuer.state.encryptionKeyHex)!;
+    expect(opened).toBe(vk(carol));
+    issuer.state = CftPrivateState.withViewingKey(issuer.state, carol.id, opened);
+    const recovered = resolveBalance(totalCt, opened).value;
     expect(recovered).toBe(5_250n);
+    // A wrong amount fails the opening check.
+    issuer.state = CftPrivateState.withViewedBalance(issuer.state, totalCt, 5_251n);
+    expect(() => sim.seize(issuer, carol, issuer)).toThrow(/does not open the balance to this amount/);
     issuer.state = CftPrivateState.withViewedBalance(issuer.state, totalCt, recovered!);
-    sim.seize(issuer, bob, issuer);
+    sim.seize(issuer, carol, issuer);
 
-    expect(sim.balances(bob)).toEqual({ spendable: 0n, pending: 0n });
+    expect(sim.balances(carol)).toEqual({ spendable: 0n, pending: 0n });
     expect(sim.balances(issuer)).toEqual({ spendable: 0n, pending: 5_250n });
     expect(readToken(sim.ledger()).totalSupply).toBe(supplyBefore);
     // The treasury learns the seized amount privately from its memo.
-    expect(memoHistory(readAccount(sim.ledger(), issuer.id), issuer.state.encryptionKeyHex)[0]).toBe(5_250n);
+    expect(memoHistory(readAccount(sim.ledger(), issuer.id), vk(issuer))[0]).toBe(5_250n);
     // Alice is unaffected.
-    expect(sim.balances(alice)).toEqual({ spendable: 0n, pending: 0n });
+    expect(sim.balances(alice)).toEqual({ spendable: 4_750n, pending: 0n });
   });
 
   it('formats and parses amounts', () => {

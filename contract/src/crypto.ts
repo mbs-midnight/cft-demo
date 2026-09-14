@@ -61,20 +61,42 @@ export const derivePk = (ek: Uint8Array): JubjubPoint => pureCircuits.derivePk(e
 export const addCiphertexts = (a: ElGamal_Ciphertext, b: ElGamal_Ciphertext): ElGamal_Ciphertext =>
   pureCircuits.addCiphertexts(a, b);
 
-/** Decrypt a credit memo with the viewing key: returns the exact delivered amount. */
-export const decryptMemo = (memo: EcdhMask_Ciphertext, ek: Uint8Array): bigint =>
-  pureCircuits.decryptMemo(memo, ek);
+// ── Viewing scalars ────────────────────────────────────────────────────────
+//
+// The ElGamal secret EK is 32 random bytes; everything a viewer does uses the
+// Jubjub scalar `s = secretToScalar(EK)` (a hash of EK). The scalar cannot be
+// turned back into EK, and it does not need to be: it decrypts memos, opens
+// balance ciphertexts and is what `register` escrows to the compliance key.
+// "Viewing key" in the wallet API therefore means this scalar, as 32-byte hex.
+
+/** `secretToScalar(EK)`: the viewing scalar behind an encryption secret. */
+export const viewingScalar = (ek: Uint8Array): bigint => pureCircuits.viewingScalar(ek);
+
+export const scalarToHex = (s: bigint): string => s.toString(16).padStart(64, '0');
+export const hexToScalar = (hex: string): bigint => {
+  const clean = hex.trim().replace(/^0x/, '');
+  if (!/^[0-9a-fA-F]{1,64}$/.test(clean)) throw new Error('viewing key must be up to 32 bytes of hex');
+  return BigInt(`0x${clean}`);
+};
+
+/** The public key a viewing scalar corresponds to (`g^s`). */
+export const pkOfScalar = (s: bigint): JubjubPoint => ecMulGenerator(s);
+
+/** Open an escrow entry with the compliance secret: the escrowed account's viewing scalar. */
+export const openEscrow = (ct: EcdhMask_Ciphertext, complianceEk: Uint8Array): bigint => pureCircuits.openEscrow(ct, complianceEk);
+
+/** Decrypt a credit memo with a viewing scalar: returns the exact delivered amount. */
+export const decryptMemo = (memo: EcdhMask_Ciphertext, s: bigint): bigint => pureCircuits.decryptMemo(memo, s);
 
 /** Decrypt an exponential-ElGamal ciphertext to the point g^value. */
-export const decryptToPoint = (ct: ElGamal_Ciphertext, ek: Uint8Array): JubjubPoint =>
-  pureCircuits.decryptToPoint(ct, ek);
+export const decryptToPoint = (ct: ElGamal_Ciphertext, s: bigint): JubjubPoint => pureCircuits.decryptToPoint(ct, s);
 
 /** g^value, the lifted encoding a balance ciphertext decrypts to. */
 export const valuePoint = (value: bigint): JubjubPoint => pureCircuits.valuePoint(value);
 
-/** True iff `ct` encrypts exactly `claimed` under the key behind `ek`. */
-export const verifyBalance = (ct: ElGamal_Ciphertext, ek: Uint8Array, claimed: bigint): boolean =>
-  pointKey(decryptToPoint(ct, ek)) === pointKey(pureCircuits.valuePoint(claimed));
+/** True iff `ct` encrypts exactly `claimed` under the key behind scalar `s`. */
+export const verifyBalance = (ct: ElGamal_Ciphertext, s: bigint, claimed: bigint): boolean =>
+  pointKey(decryptToPoint(ct, s)) === pointKey(pureCircuits.valuePoint(claimed));
 
 // ── Bounded discrete log (baby-step giant-step) ────────────────────────────
 
@@ -139,12 +161,20 @@ export class DiscreteLog {
 let sharedDlog: DiscreteLog | undefined;
 export const discreteLog = (): DiscreteLog => (sharedDlog ??= new DiscreteLog());
 
-/** Recover the plaintext balance of `ct` with viewing key `ek` (bounded search). */
+/** Recover the plaintext balance of `ct` with viewing scalar `s` (bounded search). */
 export const recoverBalance = (
   ct: ElGamal_Ciphertext,
-  ek: Uint8Array,
+  s: bigint,
   maxValue: bigint = 1n << 32n,
 ): bigint | undefined => {
   if (isZeroCiphertext(ct)) return 0n;
-  return discreteLog().solve(decryptToPoint(ct, ek), maxValue);
+  return discreteLog().solve(decryptToPoint(ct, s), maxValue);
+};
+
+/** A uniformly random nonzero Jubjub scalar (for escrow ephemeral keys). */
+export const randomEscrowScalar = (): bigint => {
+  for (;;) {
+    const s = BigInt(`0x${toHex(randomBytes32())}`) % JUBJUB_SUBGROUP_ORDER;
+    if (s !== 0n) return s;
+  }
 };

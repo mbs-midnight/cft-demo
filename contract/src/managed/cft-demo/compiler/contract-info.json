@@ -95,31 +95,6 @@
       }
     },
     {
-      "name": "setOnboarded",
-      "pure": false,
-      "proof": true,
-      "arguments": [
-        {
-          "name": "account",
-          "type": {
-            "type-name": "Bytes",
-            "length": 32
-          }
-        },
-        {
-          "name": "onboarded",
-          "type": {
-            "type-name": "Boolean"
-          }
-        }
-      ],
-      "result-type": {
-        "type-name": "Tuple",
-        "types": [
-        ]
-      }
-    },
-    {
       "name": "setFrozen",
       "pure": false,
       "proof": true,
@@ -229,6 +204,66 @@
       }
     },
     {
+      "name": "viewingScalar",
+      "pure": true,
+      "proof": false,
+      "arguments": [
+        {
+          "name": "ek",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Field"
+      }
+    },
+    {
+      "name": "openEscrow",
+      "pure": true,
+      "proof": false,
+      "arguments": [
+        {
+          "name": "ct",
+          "type": {
+            "type-name": "Struct",
+            "name": "Ciphertext",
+            "elements": [
+              {
+                "name": "ephemeralPk",
+                "type": {
+                  "type-name": "Alias",
+                  "name": "JubjubPoint",
+                  "type": {
+                    "type-name": "Opaque",
+                    "tsType": "JubjubPoint"
+                  }
+                }
+              },
+              {
+                "name": "ct",
+                "type": {
+                  "type-name": "Field"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "complianceEk",
+          "type": {
+            "type-name": "Bytes",
+            "length": 32
+          }
+        }
+      ],
+      "result-type": {
+        "type-name": "Field"
+      }
+    },
+    {
       "name": "decryptMemo",
       "pure": true,
       "proof": false,
@@ -260,10 +295,9 @@
           }
         },
         {
-          "name": "ek",
+          "name": "s",
           "type": {
-            "type-name": "Bytes",
-            "length": 32
+            "type-name": "Field"
           }
         }
       ],
@@ -308,10 +342,9 @@
           }
         },
         {
-          "name": "ek",
+          "name": "s",
           "type": {
-            "type-name": "Bytes",
-            "length": 32
+            "type-name": "Field"
           }
         }
       ],
@@ -522,7 +555,7 @@
       }
     },
     {
-      "name": "wit_ViewingKey",
+      "name": "wit_ViewingScalar",
       "arguments": [
         {
           "name": "account",
@@ -533,8 +566,15 @@
         }
       ],
       "result type": {
-        "type-name": "Bytes",
-        "length": 32
+        "type-name": "Field"
+      }
+    },
+    {
+      "name": "wit_EscrowRandomness",
+      "arguments": [
+      ],
+      "result type": {
+        "type-name": "Field"
       }
     },
     {
@@ -583,7 +623,10 @@
   "ledger": [
     {
       "name": "_balances",
-      "index": 0,
+      "index": [
+        0,
+        0
+      ],
       "exported": true,
       "storage": "Map",
       "key": {
@@ -621,7 +664,10 @@
     },
     {
       "name": "_pending",
-      "index": 1,
+      "index": [
+        1,
+        0
+      ],
       "exported": true,
       "storage": "Map",
       "key": {
@@ -659,7 +705,10 @@
     },
     {
       "name": "_encryptionKeys",
-      "index": 2,
+      "index": [
+        1,
+        1
+      ],
       "exported": true,
       "storage": "Map",
       "key": {
@@ -677,7 +726,10 @@
     },
     {
       "name": "_memos",
-      "index": 3,
+      "index": [
+        1,
+        2
+      ],
       "exported": true,
       "storage": "Map",
       "key": {
@@ -713,7 +765,10 @@
     },
     {
       "name": "_escrow",
-      "index": 4,
+      "index": [
+        1,
+        3
+      ],
       "exported": false,
       "storage": "Map",
       "key": {
@@ -824,7 +879,10 @@
     },
     {
       "name": "_isInitialized",
-      "index": 5,
+      "index": [
+        1,
+        4
+      ],
       "exported": false,
       "storage": "Cell",
       "type": {
@@ -833,7 +891,10 @@
     },
     {
       "name": "_name",
-      "index": 6,
+      "index": [
+        1,
+        5
+      ],
       "exported": true,
       "storage": "Cell",
       "type": {
@@ -843,7 +904,10 @@
     },
     {
       "name": "_symbol",
-      "index": 7,
+      "index": [
+        1,
+        6
+      ],
       "exported": true,
       "storage": "Cell",
       "type": {
@@ -853,7 +917,10 @@
     },
     {
       "name": "_decimals",
-      "index": 8,
+      "index": [
+        1,
+        7
+      ],
       "exported": true,
       "storage": "Cell",
       "type": {
@@ -863,7 +930,10 @@
     },
     {
       "name": "_totalSupply",
-      "index": 9,
+      "index": [
+        1,
+        8
+      ],
       "exported": true,
       "storage": "Cell",
       "type": {
@@ -873,7 +943,10 @@
     },
     {
       "name": "_isInitialized",
-      "index": 10,
+      "index": [
+        1,
+        9
+      ],
       "exported": false,
       "storage": "Cell",
       "type": {
@@ -882,7 +955,10 @@
     },
     {
       "name": "_owner",
-      "index": 11,
+      "index": [
+        1,
+        10
+      ],
       "exported": true,
       "storage": "Cell",
       "type": {
@@ -922,18 +998,64 @@
       }
     },
     {
-      "name": "allowlist",
-      "index": 12,
+      "name": "complianceKey",
+      "index": [
+        1,
+        11
+      ],
       "exported": true,
-      "storage": "Set",
+      "storage": "Cell",
       "type": {
+        "type-name": "Alias",
+        "name": "JubjubPoint",
+        "type": {
+          "type-name": "Opaque",
+          "tsType": "JubjubPoint"
+        }
+      }
+    },
+    {
+      "name": "escrow",
+      "index": [
+        1,
+        12
+      ],
+      "exported": true,
+      "storage": "Map",
+      "key": {
         "type-name": "Bytes",
         "length": 32
+      },
+      "value": {
+        "type-name": "Struct",
+        "name": "Ciphertext",
+        "elements": [
+          {
+            "name": "ephemeralPk",
+            "type": {
+              "type-name": "Alias",
+              "name": "JubjubPoint",
+              "type": {
+                "type-name": "Opaque",
+                "tsType": "JubjubPoint"
+              }
+            }
+          },
+          {
+            "name": "ct",
+            "type": {
+              "type-name": "Field"
+            }
+          }
+        ]
       }
     },
     {
       "name": "frozen",
-      "index": 13,
+      "index": [
+        1,
+        13
+      ],
       "exported": true,
       "storage": "Set",
       "type": {
@@ -943,7 +1065,10 @@
     },
     {
       "name": "paused",
-      "index": 14,
+      "index": [
+        1,
+        14
+      ],
       "exported": true,
       "storage": "Cell",
       "type": {

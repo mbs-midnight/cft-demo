@@ -21,8 +21,12 @@ import {
   CftPrivateState,
   accountIdFromSecretKey,
   addCiphertexts,
+  derivePk,
   fromHex,
+  hexToScalar,
+  holdsComplianceKey,
   memoHistory,
+  openEscrowedKey,
   readAccount,
   readToken,
   resolvePending,
@@ -87,11 +91,14 @@ export const deploy = async (
   decimals: bigint,
 ): Promise<DeployedCft> => {
   const issuerId = accountIdFromSecretKey(fromHex(issuerState.secretKeyHex));
+  // The issuer's own EK doubles as the compliance key every holder's viewing
+  // key is escrowed to. A production deployment would pass a separate key.
+  const compliancePk = derivePk(fromHex(issuerState.encryptionKeyHex));
   return deployContract(providers, {
     compiledContract,
     privateStateId: PRIVATE_STATE_ID,
     initialPrivateState: issuerState,
-    args: [name, symbol, decimals, issuerId],
+    args: [name, symbol, decimals, issuerId, compliancePk],
   });
 };
 
@@ -176,8 +183,9 @@ export class CftClient {
   }> {
     const view = await this.view();
     let s = await this.state();
-    const pe = resolvePending(view, s.encryptionKeyHex);
-    const sp = resolveSpendable(view, s.encryptionKeyHex, s);
+    const vk = CftPrivateState.viewingKeyHex(s);
+    const pe = resolvePending(view, vk);
+    const sp = resolveSpendable(view, vk, s);
     if (view.spendableCt && sp.value !== undefined) s = CftPrivateState.cachePlaintext(s, view.spendableCt, sp.value);
     if (view.pendingCt && pe.value !== undefined) s = CftPrivateState.cachePlaintext(s, view.pendingCt, pe.value);
     await this.setState(s);
@@ -196,18 +204,19 @@ export class CftClient {
     const view = await this.view();
     if (!view.spendableCt) throw new Error('account not registered');
     const s = await this.state();
-    if (!verifyBalance(view.spendableCt, fromHex(s.encryptionKeyHex), value)) throw new Error('claimed balance does not verify');
+    if (!verifyBalance(view.spendableCt, hexToScalar(CftPrivateState.viewingKeyHex(s)), value)) throw new Error('claimed balance does not verify');
     await this.setState(CftPrivateState.cachePlaintext(s, view.spendableCt, value));
   }
 
   async memos(): Promise<bigint[]> {
     const s = await this.state();
-    return memoHistory(await this.view(), s.encryptionKeyHex);
+    return memoHistory(await this.view(), CftPrivateState.viewingKeyHex(s));
   }
 
+  /** The holder's shareable viewing key (scalar): reads the account, cannot spend. */
   exportViewingKey = async (): Promise<ViewingKeyExport> => ({
     accountId: await this.accountId(),
-    viewingKey: (await this.state()).encryptionKeyHex,
+    viewingKey: CftPrivateState.viewingKeyHex(await this.state()),
   });
 
   private async rotateSeed(): Promise<void> {
@@ -223,26 +232,39 @@ export class CftClient {
     await this.rotateSeed();
   }
 
+  /** Permissionless. The circuit escrows this account's viewing key to the compliance key as it registers. */
   async register(): Promise<TxReceipt> {
     await this.rotateSeed();
     return receipt((await this.contract.callTx.register()).public);
   }
 
-  /** Issuer: store the holder's viewing key (collected at KYC) and allowlist the account. */
-  async onboard(vk: ViewingKeyExport): Promise<TxReceipt> {
-    await this.setState(CftPrivateState.withViewingKey(await this.state(), vk.accountId, vk.viewingKey));
-    await this.rotateSeed();
-    return receipt((await this.contract.callTx.setOnboarded(fromHex(vk.accountId), true)).public);
+  /** Does this identity's EK hold the compliance key the escrows are encrypted to? */
+  async holdsComplianceKey(): Promise<boolean> {
+    return holdsComplianceKey(await this.ledger(), (await this.state()).encryptionKeyHex);
   }
 
-  async offboard(accountId: string): Promise<TxReceipt> {
-    await this.rotateSeed();
-    return receipt((await this.contract.callTx.setOnboarded(fromHex(accountId), false)).public);
+  /**
+   * Compliance-key holder: open a registered account's on-chain escrow and
+   * remember its viewing key. No cooperation from the holder, no transaction.
+   */
+  async escrowedViewingKey(accountId: string): Promise<ViewingKeyExport> {
+    const s = await this.state();
+    const l = await this.ledger();
+    if (!holdsComplianceKey(l, s.encryptionKeyHex)) throw new Error('this identity does not hold the compliance key');
+    const opened = openEscrowedKey(l, accountId, s.encryptionKeyHex);
+    if (!opened) throw new Error(`account ${accountId} is not registered (no escrow entry)`);
+    await this.setState(CftPrivateState.withViewingKey(s, accountId, opened));
+    return { accountId: accountId.toLowerCase(), viewingKey: opened };
+  }
+
+  /** Store a viewing key a holder disclosed (the alternative to opening the escrow). */
+  async storeViewingKey(vk: ViewingKeyExport): Promise<void> {
+    await this.setState(CftPrivateState.withViewingKey(await this.state(), vk.accountId, vk.viewingKey));
   }
 
   async storedViewingKey(accountId: string): Promise<ViewingKeyExport | undefined> {
-    const ek = (await this.state()).viewingKeys[accountId.toLowerCase()];
-    return ek ? { accountId: accountId.toLowerCase(), viewingKey: ek } : undefined;
+    const k = (await this.state()).viewingKeys[accountId.toLowerCase()];
+    return k ? { accountId: accountId.toLowerCase(), viewingKey: k } : undefined;
   }
 
   async sweep(): Promise<TxReceipt> {
@@ -304,13 +326,18 @@ export class CftClient {
     const pending = resolvePending(view, vk.viewingKey).value;
     let spendable = resolveSpendable(view, vk.viewingKey).value;
     if (spendable === undefined && claimedSpendable !== undefined && view.spendableCt) {
-      if (verifyBalance(view.spendableCt, fromHex(vk.viewingKey), claimedSpendable)) spendable = claimedSpendable;
+      if (verifyBalance(view.spendableCt, hexToScalar(vk.viewingKey), claimedSpendable)) spendable = claimedSpendable;
     }
     const total = spendable !== undefined && pending !== undefined ? spendable + pending : undefined;
     return { view, memos, spendable, pending, total };
   }
 
-  /** Import a holder's viewing key and prove-and-seize their whole balance to `toAccountId`. */
+  /** Seize a frozen account the issuer has never dealt with: open its escrow, then prove-and-seize. */
+  async seizeEscrowed(accountId: string, toAccountId: string, claimedSpendable?: bigint): Promise<TxReceipt & { amount: bigint }> {
+    return this.seize(await this.escrowedViewingKey(accountId), toAccountId, claimedSpendable);
+  }
+
+  /** With a viewing key (opened from the escrow or disclosed), prove-and-seize the whole balance to `toAccountId`. */
   async seize(vk: ViewingKeyExport, toAccountId: string, claimedSpendable?: bigint): Promise<TxReceipt & { amount: bigint }> {
     const { view, total } = await this.inspect(vk, claimedSpendable);
     if (!view.spendableCt || !view.pendingCt) throw new Error('account not registered');

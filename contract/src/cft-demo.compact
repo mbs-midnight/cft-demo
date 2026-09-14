@@ -14,35 +14,40 @@
 //
 // What this wrapper adds on top of the OZ module:
 //
-//   * onboarding allowlist: `register` succeeds only for accounts the issuer
-//     has onboarded. Onboarding is where a compliant issuer collects the
-//     holder's viewing key (off-chain, at KYC time), which is what later makes
-//     `seize` possible. The issuer is onboarded by the constructor.
+//   * viewing-key escrow at registration: `register` is permissionless (any
+//     wallet in the wild can hold the token), but the circuit also encrypts
+//     the caller's viewing key to a COMPLIANCE KEY fixed at deployment and
+//     proves that the escrowed key is the one behind the encryption key it
+//     just registered. Receiving requires registration (the OZ module refuses
+//     unregistered receivers), so every holder is escrowed by construction,
+//     with no allowlist and no issuer action. This is the confidential
+//     counterpart of ERC-7943's `forceTransfer`: the authority can act on any
+//     holder it has never heard of.
 //   * issuer-gated mint (supply-accounted)
 //   * holder burn (supply-accounted)
-//   * setFrozen: a frozen account cannot send, receive, burn or be minted to. Uses the caller-identity gating pattern the OZ module
-//     documents: every caller-authenticating circuit RETURNS the caller's
-//     accountId, and the wrapper asserts on that returned value.
+//   * setFrozen: a frozen account cannot send, receive, burn or be minted to.
+//     Uses the caller-identity gating pattern the OZ module documents: every
+//     caller-authenticating circuit RETURNS the caller's accountId, and the
+//     wrapper asserts on that returned value.
 //   * setPaused: global circuit breaker for value movement.
 //   * seize: the OZ base deliberately leaves admin seize out because the
-//     authority cannot see balances. Here the issuer CAN seize, but only when
-//     it holds the account's viewing key (the ElGamal secret `EK`). The
-//     circuit proves in-zero-knowledge that the supplied key opens the
-//     account's balance to exactly `amount`, zeroes the account and credits a
-//     treasury with the same amount, conserving totalSupply. Without the
-//     viewing key the circuit is unsatisfiable, which is exactly the OZ
-//     limitation, made explicit.
+//     authority cannot see balances. Here the issuer CAN seize any frozen
+//     account: it opens the escrow with the compliance key off-chain, and the
+//     circuit proves in zero knowledge that the supplied viewing key is the
+//     account's and opens its balance to exactly `amount`, zeroes the account
+//     and credits a treasury with the same amount, conserving totalSupply.
 //
 // The viewing key concept is the CFT's own: EK decrypts memos (incoming
 // amounts) and balances but cannot spend, because spending also needs SK
-// (accountId = persistentHash(SK)).
+// (accountId = persistentHash(SK)). What is escrowed is the Jubjub scalar
+// derived from EK (`secretToScalar`), which is all a viewer ever needs.
 //
-// Only nine impure circuits are exported. Metadata, balances, memos, supply,
-// allowlist and frozen set are read straight from the public ledger state.
+// Only eight impure circuits are exported. Metadata, balances, memos, supply,
+// escrow and frozen set are read straight from the public ledger state.
 // Every exported impure circuit adds ~2.2 KB of verifier key to the deploy tx
 // and the per-block write budget on Preview is 50,000 bytes: ten circuits fit,
 // twelve were rejected ("Transaction would exhaust the block limits"), hence
-// the boolean toggles instead of paired circuits.
+// the boolean toggles instead of paired circuits. Pure circuits cost nothing.
 
 pragma language_version >= 0.23.0;
 
@@ -71,23 +76,30 @@ export {
 
 // ── Compliance state ───────────────────────────────────────────────────────
 
-export ledger allowlist: Set<Bytes<32>>;
+/** Public key the viewing keys are escrowed to. Whoever holds its secret can open every account. */
+export ledger complianceKey: JubjubPoint;
+/** accountId -> the account's viewing scalar, encrypted to `complianceKey`. Written by `register`. */
+export ledger escrow: Map<Bytes<32>, EcdhMask_Ciphertext>;
 export ledger frozen: Set<Bytes<32>>;
 export ledger paused: Boolean;
 
-// ── Compliance witnesses (issuer side, used only by `seize`) ───────────────
+// ── Compliance witnesses ───────────────────────────────────────────────────
 
 /**
- * The viewing key (ElGamal secret `EK`) of `account`, disclosed to the issuer
- * by the holder or by a compliance process. Verified in-circuit: the derived
- * public key must equal the account's registered encryption key.
+ * The viewing scalar of `account`: `secretToScalar(EK)`. For the caller's own
+ * account (register) the wallet derives it from its EK; for someone else's
+ * (seize) the issuer's wallet opens the on-chain escrow with the compliance
+ * secret, or uses a key the holder disclosed. Verified in-circuit either way:
+ * `g^scalar` must equal the account's registered encryption key.
  */
-witness wit_ViewingKey(account: Bytes<32>): Bytes<32>;
+witness wit_ViewingScalar(account: Bytes<32>): Field;
+
+/** Fresh ephemeral scalar for the escrow ciphertext (one per registration). */
+witness wit_EscrowRandomness(): Field;
 
 /**
- * The plaintext the issuer's wallet recovered for `ct` using the viewing key
- * (memo replay or bounded discrete log). Verified in-circuit by
- * `ElGamal_assertDecryptsTo`.
+ * The plaintext the issuer's wallet recovered for `ct` using the viewing
+ * scalar (memo replay or bounded discrete log). Verified in-circuit.
  */
 witness wit_ViewedBalance(ct: ElGamal_Ciphertext): Uint<128>;
 
@@ -97,7 +109,8 @@ constructor(
   name_: Opaque<"string">,
   symbol_: Opaque<"string">,
   decimals_: Uint<8>,
-  issuer: Bytes<32>
+  issuer: Bytes<32>,
+  compliancePk: JubjubPoint
 ) {
   CFT_initialize(name_, symbol_, decimals_);
   Ownable_initialize(Either<Bytes<32>, ContractAddress> {
@@ -105,8 +118,9 @@ constructor(
     left: issuer,
     right: default<ContractAddress>
   });
+  assert(compliancePk != ecMulGenerator(0 as Field), "CFTDemo: identity compliance key");
+  complianceKey = disclose(compliancePk);
   paused = false;
-  allowlist.insert(disclose(issuer));
 }
 
 // ── Guards ─────────────────────────────────────────────────────────────────
@@ -119,16 +133,45 @@ circuit assertNotFrozen(account: Bytes<32>): [] {
   assert(!frozen.member(disclose(account)), "CFTDemo: account frozen");
 }
 
+/** `g^s == pk`: the scalar really is the viewing key behind this account. */
+circuit assertViewingScalarFor(pk: JubjubPoint, s: Field): [] {
+  assert(ecMulGenerator(s) == pk, "CFTDemo: viewing key does not match the account");
+}
+
+/** Exponential ElGamal opening with a scalar: `ct.c2 - s * ct.c1 == g^amount`. */
+circuit assertOpensTo(ct: ElGamal_Ciphertext, s: Field, amount: Uint<128>): [] {
+  const shared = ecMul(ct.c1, s);
+  // The 0.23 stdlib has no point negation; ElGamal_negate negates both
+  // components of a ciphertext, so wrap the shared point and take one back.
+  const neg = ElGamal_negate(ElGamal_Ciphertext { c1: shared, c2: shared });
+  const opened = ecAdd(ct.c2, neg.c1);
+  assert(opened == ecMulGenerator(amount as Field), "CFTDemo: viewing key does not open the balance to this amount");
+}
+
+/** ECDH-masked encryption of a scalar to the compliance key (same construction as the OZ memo channel). */
+circuit escrowEncrypt(s: Field, e: Field): EcdhMask_Ciphertext {
+  assert(e != 0 as Field, "CFTDemo: zero escrow randomness");
+  const ephemeralPk = ecMulGenerator(e);
+  const shared = ecMul(complianceKey, e);
+  return EcdhMask_Ciphertext {
+    ephemeralPk: ephemeralPk,
+    ct: s + EcdhMask_kdf(shared, pad(32, "CFTDemo_escrow_v1"))
+  };
+}
+
 // ── Holder operations ──────────────────────────────────────────────────────
 
 /**
- * Register the caller's encryption key. Only onboarded accounts may register
- * (caller-identity gating on the id the module authenticated). Returns the
- * caller's accountId.
+ * Register the caller's encryption key (permissionless) and escrow the
+ * matching viewing scalar to the compliance key. The proof binds the escrowed
+ * scalar to the key just registered, so a holder cannot register one key and
+ * escrow another. Returns the caller's accountId.
  */
 export circuit register(): Bytes<32> {
   const id = CFT_register();
-  assert(allowlist.member(id), "CFTDemo: account not onboarded");
+  const s = wit_ViewingScalar(id);
+  assertViewingScalarFor(CFT__encryptionKeys.lookup(disclose(id)), s);
+  escrow.insert(disclose(id), disclose(escrowEncrypt(s, wit_EscrowRandomness())));
   return id;
 }
 
@@ -169,22 +212,7 @@ export circuit mint(account: Bytes<32>, value: Uint<128>): [] {
   CFT__mint(account, value);
 }
 
-/**
- * Onboard (true) or offboard (false) a holder. Onboarding is where the issuer
- * collects the holder's viewing key off-chain (KYC). One circuit for both
- * directions: every exported circuit costs ~2.2 KB of verifier key in the
- * deploy transaction and the per-block write budget is 50,000 bytes.
- */
-export circuit setOnboarded(account: Bytes<32>, onboarded: Boolean): [] {
-  Ownable_assertOnlyOwner();
-  if (disclose(onboarded)) {
-    allowlist.insert(disclose(account));
-  } else {
-    allowlist.remove(disclose(account));
-  }
-}
-
-/** Freeze (true) or unfreeze (false) an account. */
+/** Freeze (true) or unfreeze (false) an account. Works on any registered id, known or not. */
 export circuit setFrozen(account: Bytes<32>, isFrozen: Boolean): [] {
   Ownable_assertOnlyOwner();
   if (disclose(isFrozen)) {
@@ -202,9 +230,11 @@ export circuit setPaused(isPaused: Boolean): [] {
 
 /**
  * Seize the entire balance (spendable + pending) of a FROZEN account and
- * credit it to `to`. Requires the issuer to hold the account's viewing key:
- * the circuit proves `Dec(balance, EK) == amount` for the witness-supplied
- * EK and amount, so a wrong key or a wrong amount makes the proof fail.
+ * credit it to `to`. The issuer's wallet supplies the account's viewing
+ * scalar (opened from the escrow with the compliance secret, or disclosed by
+ * the holder) and the amount it recovered with it; the circuit proves that
+ * the scalar is the account's and that it opens the balance to exactly that
+ * amount, so a wrong key or a wrong amount makes the proof fail.
  * The seized amount is not disclosed publicly; `to` learns it via its memo.
  * totalSupply is unchanged (the value moves, it is not burned).
  */
@@ -220,9 +250,10 @@ export circuit seize(account: Bytes<32>, to: Bytes<32>): [] {
     CFT__pending.lookup(disclose(account))
   );
 
-  const viewingKey = wit_ViewingKey(account);
+  const s = wit_ViewingScalar(account);
   const amount = wit_ViewedBalance(total);
-  ElGamal_assertDecryptsTo(total, pk, viewingKey, amount);
+  assertViewingScalarFor(pk, s);
+  assertOpensTo(total, s, amount);
 
   CFT__balances.insert(disclose(account), ElGamal_encryptZero());
   CFT__pending.insert(disclose(account), ElGamal_encryptZero());
@@ -241,17 +272,24 @@ export pure circuit derivePk(ek: Bytes<32>): JubjubPoint {
   return ElGamal_derivePk(ek);
 }
 
-/** Decrypt a credit memo with the viewing key; returns the delivered amount. */
-export pure circuit decryptMemo(memo: EcdhMask_Ciphertext, ek: Bytes<32>): Field {
-  return EcdhMask_decrypt(memo, ElGamal_secretToScalar(ek), pad(32, "OZ_CFT_ecdh_memo_v1"));
+/** The viewing scalar behind an EK: what viewers use and what `register` escrows. */
+export pure circuit viewingScalar(ek: Bytes<32>): Field {
+  return ElGamal_secretToScalar(ek);
+}
+
+/** Open an escrow entry with the compliance secret: returns the account's viewing scalar. */
+export pure circuit openEscrow(ct: EcdhMask_Ciphertext, complianceEk: Bytes<32>): Field {
+  return EcdhMask_decrypt(ct, ElGamal_secretToScalar(complianceEk), pad(32, "CFTDemo_escrow_v1"));
+}
+
+/** Decrypt a credit memo with a viewing scalar; returns the delivered amount. */
+export pure circuit decryptMemo(memo: EcdhMask_Ciphertext, s: Field): Field {
+  return EcdhMask_decrypt(memo, s, pad(32, "OZ_CFT_ecdh_memo_v1"));
 }
 
 /** Decrypt a balance ciphertext to the point g^value (value recovered off-chain). */
-export pure circuit decryptToPoint(ct: ElGamal_Ciphertext, ek: Bytes<32>): JubjubPoint {
-  const s = ElGamal_secretToScalar(ek);
+export pure circuit decryptToPoint(ct: ElGamal_Ciphertext, s: Field): JubjubPoint {
   const shared = ecMul(ct.c1, s);
-  // The 0.23 stdlib has no point negation; ElGamal_negate negates both
-  // components of a ciphertext, so wrap the shared point and take one back.
   const neg = ElGamal_negate(ElGamal_Ciphertext { c1: shared, c2: shared });
   return ecAdd(ct.c2, neg.c1);
 }

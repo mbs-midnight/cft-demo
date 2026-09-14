@@ -8,6 +8,7 @@ import {
   decryptMemo,
   formatAmount,
   fromHex,
+  hexToScalar,
   isZeroCiphertext,
   readAccount,
   resolvePending,
@@ -102,7 +103,7 @@ export const fetchPublicTx = async (indexer: string, hash: string, contractAddre
 };
 
 export interface KeyRing {
-  /** accountId -> viewing key hex, for every account this browser can read. */
+  /** accountId -> viewing key (scalar hex), for every account this browser can read. */
   keys: Record<string, string>;
   /** Names for known ids (e.g. "you", "issuer"). */
   names: Record<string, string>;
@@ -153,7 +154,7 @@ export const observeTransaction = async (
     if (recipientId && ring.keys[recipientId]) {
       const view = readAccount(ledger, recipientId);
       if (view.memos.length) {
-        const amount = decryptMemo(view.memos[0], fromHex(ring.keys[recipientId]));
+        const amount = decryptMemo(view.memos[0], hexToScalar(ring.keys[recipientId]));
         priv = `${formatAmount(amount, decimals)} ${symbol} (decrypted from ${nameOf(ring, recipientId)}'s most recent credit memo)`;
       }
     }
@@ -182,10 +183,16 @@ export const observeTransaction = async (
       privateValue: 'same (the burner also knows its new balance)',
       hidden: false,
     });
-  } else if (ep === 'setFrozen' || ep === 'setOnboarded' || ep === 'setPaused') {
+  } else if (ep === 'setFrozen' || ep === 'setPaused') {
     rows.push({ label: 'Effect', publicValue: 'compliance flag change, fully public', privateValue: 'same', hidden: false });
   } else if (ep === 'register') {
     rows.push({ label: 'Effect', publicValue: 'encryption public key registered; balance set to Enc(0)', privateValue: 'same', hidden: false });
+    rows.push({
+      label: 'Viewing-key escrow',
+      publicValue: 'one ECDH ciphertext written, opaque: proven to encrypt the viewing key behind the registered public key',
+      privateValue: 'the compliance-key holder opens it and can read this account from now on',
+      hidden: true,
+    });
   } else if (ep === 'sweep') {
     rows.push({ label: 'Effect', publicValue: 'pending ciphertext folded into spendable ciphertext; amounts hidden', privateValue: 'same', hidden: false });
   }
@@ -207,11 +214,22 @@ export const observeAccount = (
     { label: 'accountId', publicValue: short(accountId, 10), privateValue: 'same', hidden: false },
     {
       label: 'Status',
-      publicValue: [view.onboarded ? 'onboarded' : 'not onboarded', view.registered ? 'registered' : 'not registered', view.frozen ? 'FROZEN' : 'active'].join(' · '),
+      publicValue: [view.registered ? 'registered' : 'not registered', view.frozen ? 'FROZEN' : 'active'].join(' · '),
       privateValue: 'same',
       hidden: false,
     },
-    { label: 'Credits received', publicValue: `${view.memos.length} memo(s), contents encrypted`, privateValue: key ? view.memos.map((m) => `+${formatAmount(decryptMemo(m, fromHex(key)), decimals)}`).join(', ') || 'none' : 'needs viewing key', hidden: true },
+    {
+      label: 'Viewing-key escrow',
+      publicValue: view.escrowed ? 'present: one opaque ciphertext to the compliance key' : 'none (not registered)',
+      privateValue: view.escrowed ? 'the compliance-key holder opens it to this account\'s viewing key' : 'nothing to open',
+      hidden: view.escrowed,
+    },
+    {
+      label: 'Credits received',
+      publicValue: `${view.memos.length} memo(s), contents encrypted`,
+      privateValue: key ? view.memos.map((m) => `+${formatAmount(decryptMemo(m, hexToScalar(key)), decimals)}`).join(', ') || 'none' : 'needs viewing key',
+      hidden: true,
+    },
   ];
   if (view.spendableCt) {
     const sp = key ? resolveSpendable(view, key) : undefined;
