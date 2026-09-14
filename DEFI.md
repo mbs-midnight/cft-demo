@@ -29,11 +29,23 @@ today, demonstrable in a wallet later", not speculation.
    the encryption secret, the plaintext of the current balance. The note model
    needs the spend secret and the note contents. A contract has no private
    state and can never answer a witness. OpenZeppelin's current `main` says it
-   plainly: "a contract has no private state, so it cannot custody such a
-   key; it could be blindly credited but could never spend, decrypt its
-   balance, or scan memos. This is a cryptographic limitation, NOT a missing
-   interface." So a pool, vault or escrow that holds the asset is out on every
-   stack.
+   plainly in the module header of
+   [`contracts/src/token/ConfidentialFungibleToken.compact`, lines 200-209](https://github.com/OpenZeppelin/compact-contracts/blob/main/contracts/src/token/ConfidentialFungibleToken.compact#L200-L209)
+   (commit `b871037`, 2026-09-02): "A contract has no private state, so it
+   cannot custody such a key; it could be blindly credited (the homomorphic
+   add needs no key) but could never spend, decrypt its balance, or scan
+   memos. This is a cryptographic limitation, NOT a missing interface." So a
+   pool, vault or escrow that holds the asset **as a contract** is out on every
+   stack. The same header names the two doors that remain, and both amount
+   to a person or a committee holding keys for the protocol: today, "a
+   protocol that needs to 'hold' these tokens uses an EOA-custodied account it
+   controls (supported today via `approve` / `transferFrom`), not the contract
+   itself"; later, "if a contract key-custody scheme ever lands alongside c2c
+   (e.g. a designated operator, threshold/MPC decryption, or a viewing-key
+   arrangement), a contract obtains a `Bytes<32>` accountId via that scheme
+   and the value logic is unchanged". Option B below is the on-chain version
+   of that idea with the issuer's authority as the operator; an operator- or
+   MPC-custodied account is the off-chain version.
 2. **Hidden amounts cannot be computed on.** Balances are exponential ElGamal,
    additive only. A circuit can prove `Dec(ct) == v` for a `v` someone
    supplies and can add ciphertexts; it cannot compare, multiply or price
@@ -287,10 +299,11 @@ the move from the recorded listing instead.
   https://github.com/midnightntwrk/compact/releases
 - midnight-js "Dynamic cross-contract calls" (open PR for Q3 2026):
   https://github.com/midnightntwrk/midnight-js/pull/1307
-- OpenZeppelin `main` ConfidentialFungibleToken header ("EOA-only ... a
-  cryptographic limitation, NOT a missing interface") and FungibleToken header
-  (contract recipients refused until C2C):
-  https://github.com/OpenZeppelin/compact-contracts
+- OpenZeppelin `main` ConfidentialFungibleToken header, "EOA-only" paragraph
+  (lines 200-219 at commit `b871037`, 2026-09-02):
+  https://github.com/OpenZeppelin/compact-contracts/blob/main/contracts/src/token/ConfidentialFungibleToken.compact#L200-L219
+  and FungibleToken header (contract recipients refused until C2C):
+  https://github.com/OpenZeppelin/compact-contracts/blob/main/contracts/src/token/FungibleToken.compact
 - Stagenet component line and its known issues: `load-test/stagenet/` in this
   workspace (midnight-js 5.0.0-beta, wallet-sdk 2.0.0-beta, ledger-v9, proof
   server 9, compactc 0.34.0)
