@@ -210,6 +210,11 @@ The honest framing: **permissionless accounts, contract-custodied asset**. The
 issuer controls nothing about who joins and everything about what the asset can
 do.
 
+[`DEFI.md`](DEFI.md) works through what this means for DeFi: the routes that
+exist on this stack (wrap into a native shielded token; DvP and lending built
+into the token contract on top of freeze, prove and seize), what each gains and
+gives up, and what stays out of reach.
+
 ## What is OpenZeppelin's and what is this project's
 
 ### From OpenZeppelin (vendored, unmodified, MIT)
