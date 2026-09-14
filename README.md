@@ -155,6 +155,61 @@ largest note you hold. Proving a transfer (k=18) takes about a minute on a
 local proof server; the wallet has to fetch an 85 MB prover key first.
 Headless check: `npm run e2e-note:standalone`.
 
+## Where the tokens live: wallets vs contract custody
+
+"Any wallet in the wild can hold the token" is true in one sense and false in
+another, and the difference shapes how these tokens can be distributed.
+
+**True: permissionless accounts.** Anyone can create an account and receive
+tokens without the issuer knowing or approving. In the e2e run, Carol's
+identity is generated in her own client and the issuer first learns of her when
+her id appears on chain. There is no allowlist and no onboarding.
+
+**False: the asset never leaves the contract.** A CFT balance is an entry in
+the contract's own ledger map, keyed by a hash of a secret. It never becomes a
+ledger-native asset: it cannot sit in a Zswap shielded coin, be shown by 1AM or
+Lace as a balance, be deposited into another contract, or trade on a DEX.
+OpenZeppelin's module header is explicit about the last point (EOA only,
+contracts cannot hold a CFT).
+
+**"Another wallet" means another client.** Tokens move between accounts, and
+an account is a keypair that the DApp generates and keeps in its private
+state, not the wallet's address or seed. The wallet only pays DUST and signs.
+In this demo "another wallet" is another browser running the DApp with its own
+identity. The identity is portable in principle (the same secrets work in any
+frontend that implements the same witnesses), but nothing derives it from the
+wallet seed today, so it lives in that browser profile unless exported.
+
+**The note model is the same, only more so.** Notes are commitments in the
+contract's Merkle tree; a payment address is a DApp-generated spend key plus
+delivery key, not a wallet address; spending needs the DApp's private state.
+The wallet knows even less than in the account model.
+
+**This is the design, not an accident.** Compliance hooks require the asset to
+stay under the contract's control. Midnight's native alternative, a
+contract-minted shielded token, is fully wallet-native and moves between
+shielded addresses, but once minted it is a ledger coin the contract can no
+longer freeze or seize. Both models here are closer to a transfer agent's
+register (ERC-3643 style) than to a bearer token.
+
+What that means in practice:
+
+- **Every holder needs a client**: the issuer's portal, an integrator's app, or
+  a wallet that adds support. The last is how ERC-20 became "wallet-native":
+  a wallet would derive SK and EK from its seed, scan the contract state and
+  sign transfers. 1AM or Lace could do this; none does yet.
+- **No DeFi composability.** The token cannot be collateral, cannot be pooled
+  and cannot be custodied by a contract.
+- **The escape hatch is a wrap step**: let a holder redeem CFT into a native
+  shielded token and back. Outside the wrapper the asset is truly wild and
+  wallet-native but uncontrollable; inside it is controllable but only
+  DApp-visible. That boundary is where ERC-7540-style exit gating (approve or
+  refuse redemptions) belongs.
+
+The honest framing: **permissionless accounts, contract-custodied asset**. The
+issuer controls nothing about who joins and everything about what the asset can
+do.
+
 ## What is OpenZeppelin's and what is this project's
 
 ### From OpenZeppelin (vendored, unmodified, MIT)
