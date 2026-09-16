@@ -8,7 +8,7 @@ what that means for DeFi on the two stacks that matter right now:
 | | Today: ledger 8 | Next: ledger 9 |
 |---|---|---|
 | Networks | Preview, Preprod, Mainnet | Stagenet |
-| Compact toolchain | 0.31.1 (language 0.23) | 0.34.0 (language 0.26) |
+| Compact toolchain | 0.31.1 (language 0.23) | 0.34.0 (language 0.26, release notes dated 2026-08-18) |
 | Client SDK | midnight-js 4.1.1, wallet-sdk 1.x / facade 3.0 | midnight-js 5.0.0-beta, wallet-sdk 2.0.0-beta |
 | Cross-contract calls | compiler rejects them | supported (since toolchain 0.33; callees may move shielded coins since 0.34) |
 | Consumer wallets | 1AM, Lace | none yet (1AM and Lace do not offer Stagenet; Gero added the network, connector status unknown) |
@@ -75,20 +75,79 @@ today, demonstrable in a wallet later", not speculation.
    native coins. The current implementation also allows one implementation
    per contract type per DApp (the caller's artifacts must ship the callee's
    compiled JavaScript alongside) and forbids cycles in the call graph.
-6. **Deploy budget.** On Preview, one deployment fits about ten circuits
-   before the block write limit rejects it. Ledger 9 has its own cost model
-   (Stagenet's differs from the genesis defaults); assume a similar ceiling
-   per contract until measured. Cross-contract calls relieve it by letting
-   a product live in its own contract.
+6. **Deploy budget.** A deploy is one transaction, and the node caps any
+   single transaction well below a full block. See "The deploy budget,
+   measured" below for the rule and the numbers; the short version is that
+   a deploy of this contract's shape fits about twelve circuits, not the
+   eighteen that dividing the block's write limit by a verifier key
+   suggests. Ledger 9 has its own cost model (Stagenet's differs from the
+   genesis defaults); assume a similar ceiling until measured. Cross-contract
+   calls relieve it by letting a product live in its own contract, and
+   maintenance updates relieve it by letting a contract grow after deploy.
 
-Constraint 5 has a consequence worth stating on its own. Every circuit of the
-CFT and of the note token uses witnesses, so **the token can never be a
-callee**, on ledger 9 or later. No pool will ever call `token.transfer`. The
-token can, however, be a **caller**: its circuits already run inside the
-holder's proof with the holder's witnesses, and from there they may call
-witness-free circuits on other contracts. Composability on Midnight therefore
-points the opposite way from Ethereum: the confidential token orchestrates,
-and DeFi contracts are witness-free coin vaults with rules.
+Constraint 5 has a consequence worth stating on its own. Every
+**value-bearing** circuit of the CFT and of the note token uses witnesses
+(register, transfer, sweep, burn, mint, seize, approve, transferFrom), so
+**no circuit that moves value can be a callee**, on ledger 9 or later. No pool
+will ever call `token.transfer`. Read-only circuits are different:
+OpenZeppelin's `main` exports witness-free `balanceOf`, `pendingOf`,
+`allowance` and `isRegistered`, and the `allowance` docstring calls its result
+"safe to prove (e.g. through a contract-to-contract call)". A contract can
+therefore read a ciphertext or a registration flag from the token; it cannot
+make the token do anything. (This demo's wrapper exports no read circuits
+because the UI reads the ledger directly; it could add them.) The token can,
+however, be a **caller**: its circuits already run inside the holder's proof
+with the holder's witnesses, and from there they may call witness-free
+circuits on other contracts. Composability on Midnight therefore points the
+opposite way from Ethereum: the confidential token orchestrates, and DeFi
+contracts are witness-free coin vaults with rules.
+
+## The deploy budget, measured
+
+The rule is the node's, not the ledger's. Midnight's node computes a
+transaction's cost in five dimensions (read time, compute time, block usage,
+bytes written, bytes churned), normalizes each against the ledger's
+`block_limits`, takes the **largest** as the transaction's fullness, and maps
+that to a Substrate extrinsic weight as fullness times the block's maximum
+weight, plus a fixed transaction-size weight (default 1% of a block). The
+Substrate normal-dispatch class then allows a single extrinsic at most **75%**
+of the block, and whatever the block has already accrued (base extrinsic
+weight, the pallet's `on_initialize`, inherents) counts against the same
+ceiling. A transaction over that line is refused at submission with the
+standard Substrate text "Transaction would exhaust the block limits" (RPC
+error 1010), which is what this project hit on 2026-09-11 with a
+twelve-circuit deploy; the wallet's own fee check had passed, because the
+wallet normalizes against the whole block, not the 75% class limit.
+
+For a deploy the binding dimension is bytes written. Measured with ledger-v8's
+own `Transaction.cost` against Preview's live parameters (the standalone
+stack's are identical):
+
+| Deploy | bytes written | of the 50,000 write limit | node weight |
+|---|---|---|---|
+| this contract, 8 circuits, as finalized on chain | 22,534 | 45.1% | about 46% |
+| the earlier 10-circuit version, as finalized | 27,076 | 54.2% | about 55% |
+| synthetic 12 circuits of this shape | 33,496 | 67.0% | about 68%, refused live |
+| synthetic 14 circuits | 38,929 | 77.9% | over the 75% ceiling |
+| synthetic 18 circuits | 49,605 | 99.2% | over |
+
+The synthetic rows clone this contract's verifier keys under new entry-point
+names with distinct bytes; identical bytes are undercounted because the
+ledger's storage is content-addressed. Each additional distinct circuit of
+this shape adds about 2.6 KB written, or about 5 points of fullness. The other
+four dimensions stay under 3% for a deploy of any size tried.
+
+Two qualifications. Verifier-key size barely depends on `k` for the circuits
+here (2,119 to 2,311 bytes across `k` 10 to 16), so "count the circuits" is a
+fair proxy for circuits shaped like these eight; OpenZeppelin reports that its
+SHA-256-heavy full surface did not fit on the same stack, and this project has
+not measured what those circuits write. And the ceiling applies per deploy
+**transaction**, not per contract: ledger-8 maintenance updates can insert
+new verifier keys under new entry points (`VerifierKeyInsert`), so a contract
+can, as OpenZeppelin's header says, "start with a lean surface and add
+operations by upgrade". What a maintenance update cannot do is change the
+ledger layout, so any field a later circuit will need must be declared at
+deploy.
 
 ## Option A: wrap into a native shielded token
 
@@ -120,12 +179,11 @@ The alternatives are to not track it on chain (the issuer can still audit
 wraps per account through the escrowed keys) or to accept the leak as the
 price of a public "circulating in the wild" figure.
 
-**On ledger 8:** buildable now. Two more circuits makes ten; the deploy budget
-is bytes, not a circuit count, but verifier keys are near-constant in size
-(2.1 to 2.3 KB each here regardless of `k`) and the ten-circuit deployment
-measured earlier wrote 27,076 bytes against a 50,000-byte block budget, so
-the arithmetic is a fair proxy. `k` affects prover-key size and proving time,
-not the deploy. **On ledger 9:**
+**On ledger 8:** buildable now. Two more circuits makes ten, which the
+measurements above put at about 55% of the node's weight ceiling, the same
+as the ten-circuit version that deployed on 2026-09-11. `k` affects
+prover-key size and proving time; for the deploy it matters only through the
+verifier key, which is near-constant for circuits shaped like these. **On ledger 9:**
 identical, and the wrapped coin is what plugs the asset into whatever
 cross-contract DeFi appears there, since coins need no witnesses to be held.
 
@@ -207,9 +265,11 @@ Swaps against a pool of the token itself (constraint 1), on any stack.
 ### B on ledger 8: monolithic
 
 Everything above must be circuits **of the token contract**: two to four per
-product, against a ceiling of about ten with eight already used. One product
-per deployment; the coin escrow, the price source and the token share one
-contract and one budget.
+product, against a per-transaction ceiling of about twelve circuits of this
+shape with eight already used. So one product fits in the deploy transaction,
+and a second can be added later by maintenance update if its ledger fields
+were declared at deploy; the coin escrow, the price source and the token share
+one contract either way.
 
 ### B on ledger 9: the token as orchestrator
 
@@ -230,12 +290,14 @@ The same products, split along the witness line:
 Gains: the deploy budget stops being the design constraint (each product adds
 one or two circuits to the token; the heavy logic lives elsewhere), the coin
 side becomes reusable infrastructure shared across issuers, and settlement
-stays atomic because the whole call graph is one transaction. Costs: the
-callee cannot tell which contract called it (the reference exposes a
-contract's own address through `kernel.self()`, not its caller's), so callee
-authorization has to travel in the arguments (a commitment or proof the token
-circuit computes) or the callee must be safe to call by anyone; one
-implementation per contract type per DApp; no call cycles.
+stays atomic because the whole call graph is one transaction. Costs: we
+found no documented way for a callee to learn which contract called it (the
+reference and the standard library expose a contract's own address through
+`kernel.self()`; the 0.34 notes say a callee "wants that caller's
+`ContractAddress`" without saying where it comes from), so until that is
+settled callee authorization has to travel in the arguments (a commitment or
+proof the token circuit computes) or the callee must be safe to call by
+anyone; one implementation per contract type per DApp; no call cycles.
 
 ## Option C: composability in the Ethereum direction
 
@@ -293,8 +355,9 @@ to the caller (a local, private result)" to be handed over out of band. A
 contract has no private state to hold a spend secret, a note or a Merkle
 path, and no way to receive a note handed over out of band, so a contract
 cannot own notes for the same cryptographic reason a contract cannot own a
-CFT balance. Every note circuit uses witnesses, so the note token can be a
-caller but never a callee. Wrap (consume a note, mint a coin;
+CFT balance. Every value-bearing note circuit uses witnesses, so the note
+token can be a caller but never a callee for anything that moves a note;
+read-only circuits, if a wrapper exported them, could be called. Wrap (consume a note, mint a coin;
 receive a coin, deliver a note plus audit record) works as in A. The
 freeze-prove pattern is natural per note: a note has a fixed value, so a
 listing is "reveal this note's value to the contract and freeze its
@@ -313,7 +376,7 @@ the move from the recorded listing instead.
 | Amounts hidden | in Zswap, unauditable | disclosed per deal | disclosed per deal | public at the pool boundary | to the issuer |
 | Swaps against a pool | any coin AMM | no | no (coin legs only) | yes, public side | no |
 | Needs cross-contract calls | no | no | yes | yes, plus a standard change | no |
-| Deploy budget pressure | +2 circuits | one product per deployment | +1 or 2 per product on the token | n/a | none |
+| Deploy budget pressure | +2 circuits (about 55% of the ceiling) | one product per deploy tx, more by maintenance update | +1 or 2 per product on the token | n/a | none |
 | Buildable and testable now | ledger 8, in the browser | ledger 8, in the browser | Stagenet, headless CLI only | no | ledger 8 |
 
 ## What stays out of reach on either stack
@@ -323,7 +386,8 @@ the move from the recorded listing instead.
   primitive provides it.
 - **A contract custodying the asset while it stays confidential.** Contracts
   keep no secrets; any contract-held balance is public by nature.
-- **Pool-initiated token movements.** The token is never a callee.
+- **Pool-initiated token movements.** No value-bearing circuit of the token
+  can be a callee; a contract can at most read from it.
 - **A single-transaction swap of two parties' confidential balances.** Only
   one party's witnesses exist in a proof. Listing plus buyer-side settlement
   (B1) is the workaround, and it is atomic from the buyer's side.
@@ -364,11 +428,21 @@ the move from the recorded listing instead.
   https://docs.midnight.network/compact/reference/compact-reference
 - Compact standard library exports (shielded mint, receive, send; `kernel.self()`):
   https://docs.midnight.network/compact/standard-library/exports
-- Compact toolchain releases (0.33 adds ledger 9, cross-contract calls,
-  events; 0.34.0, 2026-08-25, lets callees perform shielded coin operations
-  and states that `ownPublicKey()` names the transaction submitter, never
-  the calling contract):
-  https://github.com/midnightntwrk/compact/releases
+- Compact toolchain 0.34.0 release notes (dated 2026-08-18 on the docs site;
+  the GitHub release was published 2026-08-25). 0.33 added ledger 9,
+  cross-contract calls and events; 0.34.0 lets callees perform shielded coin
+  operations and states that `ownPublicKey()` names the transaction
+  submitter, never the calling contract:
+  https://docs.midnight.network/relnotes/compact/toolchain-0.34.0 and
+  https://github.com/midnightntwrk/compact/releases/tag/compactc-v0.34.0
+- Node-side weight rule: `pallets/midnight/src/lib.rs` (`check_weight`,
+  `get_tx_weight`, `EXTRA_WEIGHT_TX_SIZE`) and
+  `ledger/src/versions/common/mod.rs` (`get_transaction_cost`,
+  `scale_normalized_cost`) in https://github.com/midnightntwrk/midnight-node;
+  `NORMAL_DISPATCH_RATIO = 75%` in `runtime/src/lib.rs`. Ledger-side
+  normalization: `base-crypto/src/cost_model.rs` in
+  https://github.com/midnightntwrk/midnight-ledger. Maintenance updates:
+  `SingleUpdate::VerifierKeyInsert` in `ledger/src/structure.rs`.
 - midnight-js "Dynamic cross-contract calls" (open PR for Q3 2026):
   https://github.com/midnightntwrk/midnight-js/pull/1307
 - OpenZeppelin `main` ConfidentialFungibleToken header, "EOA-only" paragraph

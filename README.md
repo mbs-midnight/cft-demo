@@ -104,15 +104,17 @@ Key design points, as the module documents them:
 - **Concurrency.** Two credits to the same recipient in one block conflict.
 - **Memo griefing.** Anyone can spam value-1 credits to grow a victim's memo
   list; only the owner can clear it.
-- **Deploy byte budget.** The value circuits are SHA-256-heavy (k=13..16).
-  Preview's ledger allows 50,000 `bytes_written` per block and every exported
-  circuit adds roughly 2.7 KB (verifier key plus operation) to the deploy.
-  Measured on the identical local stack: a ten-circuit deploy wrote 27,076
-  bytes (54% of the block limit) and was accepted; a twelve-circuit one
-  (about 32.5 KB) was rejected with "Transaction would exhaust the block
-  limits", so a single transaction is held well under the whole block. The
-  issuer toggles are therefore single boolean circuits: nine circuits total,
-  about 24 KB.
+- **Deploy budget.** A deploy is one transaction, and the node caps a single
+  transaction at 75% of a block (Substrate's normal-dispatch class), measured
+  as the largest of the ledger's five cost dimensions; for a deploy that is
+  `bytes_written` against a 50,000-byte limit. Every exported circuit adds
+  about 2.6 KB written (verifier key plus operation). Measured on the
+  identical local stack: the current eight-circuit deploy writes 22,534 bytes
+  (45%), the earlier ten-circuit one wrote 27,076 (54%), and a twelve-circuit
+  one (modeled at 67%) was refused with "Transaction would exhaust the block
+  limits" once base and already-accrued block weight were added. The issuer
+  toggles are therefore single boolean circuits. Maintenance updates can add
+  circuits to a deployed contract later. `DEFI.md` has the full measurement.
 - **Stack pinning.** OZ `main` (0.4.0-alpha) requires Compact language 0.26,
   compiler 0.34, compact-runtime 0.19, midnight-js 5.0.0-beta, ledger 9, which
   today only Stagenet runs. Preview, Preprod and Mainnet are on compiler
@@ -408,7 +410,8 @@ Things the UI does for you, and their edge cases:
 - **Errors.** Ledger `Custom error: 170` means the node rejected the DUST fee
   proof the wallet attached (stale wallet DUST state, or a wallet/prover on a
   different ledger version than the network); the banner explains it. "Would
-  exhaust the block limits" means a deploy has too many circuits.
+  exhaust the block limits" means the transaction is over the node's
+  per-transaction weight ceiling, for a deploy: too many circuits.
 
 Amounts are typed in tokens (`12.5`), converted with the token's decimals.
 A CFT account is not the wallet address: connecting derives a per-wallet
