@@ -110,10 +110,22 @@ bearer instrument; the escrowed viewing keys open the register, not the coins.
 `wrap` refused for frozen accounts and while paused; `unwrap` the only way
 back, so redemption to the real-world asset (settled from the register)
 requires re-entering a registered, unfrozen, escrowed account. The issuer can
-pause wrapping alone or cap the wrapped share of supply. The wrapped total is
-public.
+pause wrapping alone or cap the wrapped share of supply.
 
-**On ledger 8:** buildable now, two circuits, ten in total. **On ledger 9:**
+**A leak to decide about.** If the contract tracks the wrapped total in a
+public ledger field, every `wrap` and `unwrap` amount is revealed by the
+delta, exactly as mint and burn amounts leak through `totalSupply` today
+(OpenZeppelin's header makes the same warning about public-supply layers).
+The alternatives are to not track it on chain (the issuer can still audit
+wraps per account through the escrowed keys) or to accept the leak as the
+price of a public "circulating in the wild" figure.
+
+**On ledger 8:** buildable now. Two more circuits makes ten; the deploy budget
+is bytes, not a circuit count, but verifier keys are near-constant in size
+(2.1 to 2.3 KB each here regardless of `k`) and the ten-circuit deployment
+measured earlier wrote 27,076 bytes against a 50,000-byte block budget, so
+the arithmetic is a fair proxy. `k` affects prover-key size and proving time,
+not the deploy. **On ledger 9:**
 identical, and the wrapped coin is what plugs the asset into whatever
 cross-contract DeFi appears there, since coins need no witnesses to be held.
 
@@ -148,6 +160,31 @@ Limits: the listing amount and price are public; the seller's whole account
 is frozen while listed (a partial lock needs a change to the balance layout);
 fixed price per listing, an order board rather than a pool.
 
+**The wallet-side requirement that comes with any authority-driven debit.**
+OpenZeppelin's header is explicit that memos record credits only and that
+"the wallet's running plaintext cache, not memo replay, is the authoritative
+balance". A settlement, a liquidation or today's `seize` is a debit the
+holder's wallet did not make. If the wallet keeps a stale plaintext, its next
+`wit_PlaintextBalance` is wrong, `ElGamal_assertDecryptsTo` fails inside the
+proof, and the account is unusable until the wallet recovers the true value.
+Two mitigations, both needed: the contract should record the debited amount
+publicly (the listing already does) so a wallet can compute `old - amount` as
+a candidate, and wallets must treat a changed spendable ciphertext as a cache
+miss rather than a cache hit. This project's wallet layer keys its cache by
+ciphertext, so a foreign debit misses and falls through to candidates, memo
+sums, bounded recovery and finally a holder-typed value; today's full `seize`
+writes the fixed `Enc(0)`, which it recognises as zero. A wallet built on
+OpenZeppelin's test witness alone has none of that. This is an integration
+requirement for 1AM and Lace, not a footnote, and it is the first thing a
+custodian's engineer will ask about.
+
+**Freeze coverage.** In the OZ module `approve` is also a debit of the
+spendable balance (it moves value into an escrow entry), so a wrapper that
+exposes `approve` and `transferFrom` must gate them on frozen and paused
+like `transfer` and `burn`. This demo's wrapper does not export them, which
+is why its eight circuits are enough; a fuller wrapper needs the gates and
+the deploy bytes.
+
 ### B2. Lending with the token as collateral
 
 Same pattern: prove, freeze, record; the contract disburses a loan in a
@@ -156,6 +193,12 @@ posted price crossing a threshold) lets anyone call `liquidate`, which seizes
 the recorded collateral to the lender. Interest and loan-to-value run on the
 recorded plaintext the borrower disclosed when proving it. The stablecoin
 side is a native coin, which a contract can custody without difficulty.
+
+The price is the weak point on ledger 8. Monolithic means the price is
+posted **into the token contract** by an authority through one more circuit,
+so liquidation rests on trusting whoever posts it (in this demo that would be
+the issuer). On ledger 9 the token reads `oracle.price()` from a separate
+contract, which relocates the trust rather than removing it.
 
 ### B3. What B cannot do
 
@@ -202,9 +245,22 @@ impossible on every stack (witness-free callee rule plus constraint 1). Two
 things that do become possible on ledger 9 are adjacent to it:
 
 - **A public-balance token as a callee.** OpenZeppelin's `FungibleToken`
-  (not confidential) is the module whose `main` header says C2C support is
-  planned; with contract-address holders it could be pooled, swapped and
-  lent in the familiar direction. Confidential between people it is not.
+  (not confidential) is the module whose `main` header lays out a migration
+  plan for when C2C lands (transfers to contract addresses are refused today
+  with "unsafe transfer"). Two things stand between that plan and pools in
+  the familiar direction. First, `FungibleToken` authenticates its caller
+  with a witness (`wit_FungibleTokenSK`), so as written it cannot be a
+  callee at all under the witness-free rule; a callee version has to
+  authenticate differently. Second, the natural replacement does not work:
+  the 0.34 release notes state that `ownPublicKey()` "always names the
+  transaction submitter, never the calling contract", so a pool calling
+  `token.transferFrom` would authenticate as the human who submitted the
+  transaction, not as the pool. Contract-as-holder needs the callee to learn
+  the caller's `ContractAddress`, which the reference does not document; the
+  release notes say a callee "wants that caller's ContractAddress", which
+  points at passing it as an argument and trusting it. That is the same open
+  dependency as the callee-authorization caveat in Option B on ledger 9.
+  Confidential between people such a token is not.
 - **Hybrid: confidential register plus a public, contract-held float.** A
   wrapper could keep confidential accounts for people and a plain public
   balance map for contracts (authenticated by the calling contract's
@@ -308,8 +364,10 @@ the move from the recorded listing instead.
   https://docs.midnight.network/compact/reference/compact-reference
 - Compact standard library exports (shielded mint, receive, send; `kernel.self()`):
   https://docs.midnight.network/compact/standard-library/exports
-- Compact toolchain releases (0.33 adds cross-contract calls; 0.34.0, 2026-08-25,
-  lets callees perform shielded coin operations):
+- Compact toolchain releases (0.33 adds ledger 9, cross-contract calls,
+  events; 0.34.0, 2026-08-25, lets callees perform shielded coin operations
+  and states that `ownPublicKey()` names the transaction submitter, never
+  the calling contract):
   https://github.com/midnightntwrk/compact/releases
 - midnight-js "Dynamic cross-contract calls" (open PR for Q3 2026):
   https://github.com/midnightntwrk/midnight-js/pull/1307
