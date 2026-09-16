@@ -78,7 +78,8 @@ today, demonstrable in a wallet later", not speculation.
 6. **Deploy budget.** A deploy is one transaction, and the node caps any
    single transaction well below a full block. See "The deploy budget,
    measured" below for the rule and the numbers; the short version is that
-   a deploy of this contract's shape fits about twelve circuits, not the
+   ten circuits of this contract's shape are proven to deploy, eleven fit by
+   the measured model but are untested, and twelve were refused, not the
    eighteen that dividing the block's write limit by a verifier key
    suggests. Ledger 9 has its own cost model (Stagenet's differs from the
    genesis defaults); assume a similar ceiling until measured. Cross-contract
@@ -109,33 +110,42 @@ transaction's cost in five dimensions (read time, compute time, block usage,
 bytes written, bytes churned), normalizes each against the ledger's
 `block_limits`, takes the **largest** as the transaction's fullness, and maps
 that to a Substrate extrinsic weight as fullness times the block's maximum
-weight, plus a fixed transaction-size weight (default 1% of a block). The
-Substrate normal-dispatch class then allows a single extrinsic at most **75%**
-of the block, and whatever the block has already accrued (base extrinsic
-weight, the pallet's `on_initialize`, inherents) counts against the same
-ceiling. A transaction over that line is refused at submission with the
-standard Substrate text "Transaction would exhaust the block limits" (RPC
-error 1010), which is what this project hit on 2026-09-11 with a
-twelve-circuit deploy; the wallet's own fee check had passed, because the
-wallet normalizes against the whole block, not the 75% class limit.
+weight, plus a fixed transaction-size weight (default 1% of a block; the
+chain storage that could override it is unset on both Preview and the
+standalone stack). Substrate's `CheckWeight` then applies the runtime's
+`BlockWeights`, read from both nodes: the normal-dispatch class may fill 75%
+of the block in total, but a **single extrinsic may not exceed
+`maxExtrinsic` = 64.99%** of the block (the standard `with_sensible_defaults`
+layout, which reserves an average `on_initialize` allowance out of the 75%).
+Accrued block weight is not the issue: on both networks an empty block carries
+1.09% mandatory weight (three inherent extrinsics) and 0% normal weight. A
+transaction over `maxExtrinsic` is refused at submission with the standard
+Substrate text "Transaction would exhaust the block limits" (RPC error 1010),
+which is what this project hit on 2026-09-11 with a twelve-circuit deploy.
+The wallet's own fee check had passed, because the wallet normalizes against
+the whole block, not the single-extrinsic cap.
 
 For a deploy the binding dimension is bytes written. Measured with ledger-v8's
 own `Transaction.cost` against Preview's live parameters (the standalone
 stack's are identical):
 
-| Deploy | bytes written | of the 50,000 write limit | node weight |
-|---|---|---|---|
-| this contract, 8 circuits, as finalized on chain | 22,534 | 45.1% | about 46% |
-| the earlier 10-circuit version, as finalized | 27,076 | 54.2% | about 55% |
-| synthetic 12 circuits of this shape | 33,496 | 67.0% | about 68%, refused live |
-| synthetic 14 circuits | 38,929 | 77.9% | over the 75% ceiling |
-| synthetic 18 circuits | 49,605 | 99.2% | over |
+| Deploy | bytes written | of the 50,000 write limit | extrinsic weight (fullness + 1%) | vs `maxExtrinsic` 64.99% |
+|---|---|---|---|---|
+| this contract, 8 circuits, as finalized on chain | 22,534 | 45.1% | 46.1% | fits (deployed) |
+| the earlier 10-circuit version, as finalized | 27,076 | 54.2% | 55.2% | fits (deployed 2026-09-11) |
+| synthetic 11 circuits of this shape | about 30,900 | about 62% | about 63% | fits by the model, untested |
+| synthetic 12 circuits | 33,496 | 67.0% | 68.0% | over: refused live 2026-09-11 |
+| synthetic 14 circuits | 38,929 | 77.9% | 78.9% | over |
+| synthetic 18 circuits | 49,605 | 99.2% | 100.2% | over |
 
 The synthetic rows clone this contract's verifier keys under new entry-point
 names with distinct bytes; identical bytes are undercounted because the
 ledger's storage is content-addressed. Each additional distinct circuit of
-this shape adds about 2.6 KB written, or about 5 points of fullness. The other
-four dimensions stay under 3% for a deploy of any size tried.
+this shape adds about 2.6 to 2.7 KB written, or about 5 points of fullness;
+the eleven-circuit row is interpolated from the measured neighbors. The other
+four dimensions stay under 3% for a deploy of any size tried. So: ten
+circuits proven, eleven modeled to fit with about two points to spare, twelve
+refused.
 
 Two qualifications. Verifier-key size barely depends on `k` for the circuits
 here (2,119 to 2,311 bytes across `k` 10 to 16), so "count the circuits" is a
@@ -265,11 +275,13 @@ Swaps against a pool of the token itself (constraint 1), on any stack.
 ### B on ledger 8: monolithic
 
 Everything above must be circuits **of the token contract**: two to four per
-product, against a per-transaction ceiling of about twelve circuits of this
-shape with eight already used. So one product fits in the deploy transaction,
-and a second can be added later by maintenance update if its ledger fields
-were declared at deploy; the coin escrow, the price source and the token share
-one contract either way.
+product, with eight already used and a single-transaction cap that admitted
+ten and refused twelve. So a two-circuit product deploys on proven ground, a
+three-circuit one fits by the model but is untested, and a four-circuit one
+lands on twelve, which was refused. Anything beyond that goes in by
+maintenance update after deploy, provided its ledger fields were declared at
+deploy; the coin escrow, the price source and the token share one contract
+either way.
 
 ### B on ledger 9: the token as orchestrator
 
@@ -376,7 +388,7 @@ the move from the recorded listing instead.
 | Amounts hidden | in Zswap, unauditable | disclosed per deal | disclosed per deal | public at the pool boundary | to the issuer |
 | Swaps against a pool | any coin AMM | no | no (coin legs only) | yes, public side | no |
 | Needs cross-contract calls | no | no | yes | yes, plus a standard change | no |
-| Deploy budget pressure | +2 circuits (about 55% of the ceiling) | one product per deploy tx, more by maintenance update | +1 or 2 per product on the token | n/a | none |
+| Deploy budget pressure | +2 circuits (ten total, proven) | one product of two or three circuits per deploy tx, more by maintenance update | +1 or 2 per product on the token | n/a | none |
 | Buildable and testable now | ledger 8, in the browser | ledger 8, in the browser | Stagenet, headless CLI only | no | ledger 8 |
 
 ## What stays out of reach on either stack
@@ -439,7 +451,11 @@ the move from the recorded listing instead.
   `get_tx_weight`, `EXTRA_WEIGHT_TX_SIZE`) and
   `ledger/src/versions/common/mod.rs` (`get_transaction_cost`,
   `scale_normalized_cost`) in https://github.com/midnightntwrk/midnight-node;
-  `NORMAL_DISPATCH_RATIO = 75%` in `runtime/src/lib.rs`. Ledger-side
+  `NORMAL_DISPATCH_RATIO = 75%` and `BlockWeights::with_sensible_defaults(2 s)`
+  in `runtime/src/lib.rs`. The live values (`maxExtrinsic` 64.99%, normal
+  `maxTotal` 75%, `baseExtrinsic` 0.01%, empty-block mandatory weight 1.09%)
+  were read from both nodes' `system.blockWeights` constant and
+  `system.blockWeight` storage on 2026-09-16. Ledger-side
   normalization: `base-crypto/src/cost_model.rs` in
   https://github.com/midnightntwrk/midnight-ledger. Maintenance updates:
   `SingleUpdate::VerifierKeyInsert` in `ledger/src/structure.rs`.

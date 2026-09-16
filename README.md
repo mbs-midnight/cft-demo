@@ -104,17 +104,18 @@ Key design points, as the module documents them:
 - **Concurrency.** Two credits to the same recipient in one block conflict.
 - **Memo griefing.** Anyone can spam value-1 credits to grow a victim's memo
   list; only the owner can clear it.
-- **Deploy budget.** A deploy is one transaction, and the node caps a single
-  transaction at 75% of a block (Substrate's normal-dispatch class), measured
-  as the largest of the ledger's five cost dimensions; for a deploy that is
-  `bytes_written` against a 50,000-byte limit. Every exported circuit adds
-  about 2.6 KB written (verifier key plus operation). Measured on the
-  identical local stack: the current eight-circuit deploy writes 22,534 bytes
-  (45%), the earlier ten-circuit one wrote 27,076 (54%), and a twelve-circuit
-  one (modeled at 67%) was refused with "Transaction would exhaust the block
-  limits" once base and already-accrued block weight were added. The issuer
-  toggles are therefore single boolean circuits. Maintenance updates can add
-  circuits to a deployed contract later. `DEFI.md` has the full measurement.
+- **Deploy budget.** A deploy is one transaction, and Substrate caps a single
+  extrinsic at `maxExtrinsic` = 65% of a block on these networks. The node
+  measures a transaction as the largest of the ledger's five cost dimensions;
+  for a deploy that is `bytes_written` against a 50,000-byte limit, plus a 1%
+  size weight. Every exported circuit adds about 2.6 to 2.7 KB written
+  (verifier key plus operation). Measured on the identical local stack: the
+  current eight-circuit deploy writes 22,534 bytes (45%), the earlier
+  ten-circuit one wrote 27,076 (54%, accepted), and a twelve-circuit one
+  (modeled at 67% + 1%) was refused with "Transaction would exhaust the block
+  limits". Ten proven, eleven untested, twelve refused. The issuer toggles
+  are therefore single boolean circuits. Maintenance updates can add circuits
+  to a deployed contract later. `DEFI.md` has the full measurement.
 - **Stack pinning.** OZ `main` (0.4.0-alpha) requires Compact language 0.26,
   compiler 0.34, compact-runtime 0.19, midnight-js 5.0.0-beta, ledger 9, which
   today only Stagenet runs. Preview, Preprod and Mainnet are on compiler
